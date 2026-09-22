@@ -1,6 +1,7 @@
 from datetime import date
 
 from app.domain.models.base_product import BaseProduct
+from app.domain.models.serialized_product import SerializedProduct
 
 
 class Batch:
@@ -10,6 +11,7 @@ class Batch:
         product: BaseProduct,
         quantity: int,
         expiry_date: date | None = None,
+        serial_numbers: list[str] | None = None,
     ):
         if not isinstance(batch_id, str):
             raise ValueError("Batch ID must be a string")
@@ -41,10 +43,44 @@ class Batch:
                 "Expiry date is required for perishable products"
             )
 
+        if serial_numbers is not None:
+            if not isinstance(serial_numbers, list):
+                raise ValueError(
+                    "Serial numbers must be a list"
+                )
+
+            for serial_number in serial_numbers:
+                if not isinstance(serial_number, str):
+                    raise ValueError(
+                        "Serial number must be a string"
+                    )
+
+                if not serial_number.strip():
+                    raise ValueError(
+                        "Serial number cannot be empty"
+                    )
+
+            if len(serial_numbers) != len(set(serial_numbers)):
+                raise ValueError(
+                    "Serial numbers must be unique"
+                )
+
+        if isinstance(product, SerializedProduct):
+            if serial_numbers is None:
+                raise ValueError(
+                    "Serial numbers are required for serialized products"
+                )
+
+            if len(serial_numbers) != quantity:
+                raise ValueError(
+                    "Number of serial numbers must match quantity"
+                )
+
         self.batch_id = batch_id
         self.product = product
         self.quantity = quantity
         self.expiry_date = expiry_date
+        self.serial_numbers = serial_numbers
 
     def is_expired(
         self,

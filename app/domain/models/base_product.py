@@ -46,6 +46,7 @@ class BaseProduct:
         self.category = category
         self.base_price = base_price
         self.expiry_tracking = False
+        self.serial_tracking = False
 
     def get_price(self) -> Decimal:
         return self.base_price
