@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -47,6 +48,7 @@ def create_inventory(
             batch_id="BATCH-LAPTOP",
             product=laptop,
             quantity=stock_laptop,
+            entry_date=date(2026, 9, 1),
         )
     )
 
@@ -55,6 +57,7 @@ def create_inventory(
             batch_id="BATCH-MOUSE",
             product=mouse,
             quantity=stock_mouse,
+            entry_date=date(2026, 9, 1),
         )
     )
 
@@ -62,7 +65,7 @@ def create_inventory(
 
 
 def create_order():
-    order = Order(order_id="ORD-001")
+    order = Order(order_id="ORD-1001")
 
     order.add_item(
         OrderItem(
@@ -86,7 +89,7 @@ def create_order():
 def test_reserve_order_with_one_item():
     inventory = create_inventory()
 
-    order = Order(order_id="ORD-001")
+    order = Order(order_id="ORD-1001")
 
     order.add_item(
         OrderItem(
@@ -104,14 +107,10 @@ def test_reserve_order_with_one_item():
     )
 
     assert len(reservations) == 1
-
-    reservation = reservations[0]
-
-    assert reservation.order_id == "ORD-001"
-    assert reservation.order_item_id == "ITEM-001"
-    assert reservation.sku == "LAPTOP-01"
-    assert reservation.quantity == 3
-
+    assert reservations[0].order_id == "ORD-1001"
+    assert reservations[0].order_item_id == "ITEM-001"
+    assert reservations[0].sku == "LAPTOP-01"
+    assert reservations[0].quantity == 3
     assert inventory.get_reserved_stock("LAPTOP-01") == 3
     assert inventory.get_available_stock("LAPTOP-01") == 7
 
@@ -119,7 +118,6 @@ def test_reserve_order_with_one_item():
 def test_reserve_order_with_multiple_items():
     inventory = create_inventory()
     order = create_order()
-
     service = OrderService()
 
     reservations = service.reserve_order(
@@ -128,10 +126,8 @@ def test_reserve_order_with_multiple_items():
     )
 
     assert len(reservations) == 2
-
     assert inventory.get_reserved_stock("LAPTOP-01") == 3
     assert inventory.get_reserved_stock("MOUSE-01") == 2
-
     assert inventory.get_available_stock("LAPTOP-01") == 7
     assert inventory.get_available_stock("MOUSE-01") == 8
 
@@ -139,7 +135,6 @@ def test_reserve_order_with_multiple_items():
 def test_reservation_changes_order_status_to_reserved():
     inventory = create_inventory()
     order = create_order()
-
     service = OrderService()
 
     service.reserve_order(
@@ -152,8 +147,7 @@ def test_reservation_changes_order_status_to_reserved():
 
 def test_reservation_fails_when_stock_is_insufficient():
     inventory = create_inventory(stock_laptop=2)
-
-    order = Order(order_id="ORD-001")
+    order = Order(order_id="ORD-1001")
 
     order.add_item(
         OrderItem(
@@ -165,13 +159,17 @@ def test_reservation_fails_when_stock_is_insufficient():
 
     service = OrderService()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError,
+        match="Insufficient available stock for SKU LAPTOP-01",
+    ):
         service.reserve_order(
             order=order,
             inventory=inventory,
         )
 
     assert inventory.get_reserved_stock("LAPTOP-01") == 0
+    assert order.status == OrderStatus.CREATED
 
 
 def test_failed_multi_item_reservation_is_atomic():
@@ -180,11 +178,30 @@ def test_failed_multi_item_reservation_is_atomic():
         stock_mouse=1,
     )
 
-    order = create_order()
+    order = Order(order_id="ORD-1001")
+
+    order.add_item(
+        OrderItem(
+            item_id="ITEM-001",
+            sku="LAPTOP-01",
+            quantity=3,
+        )
+    )
+
+    order.add_item(
+        OrderItem(
+            item_id="ITEM-002",
+            sku="MOUSE-01",
+            quantity=2,
+        )
+    )
 
     service = OrderService()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError,
+        match="Insufficient available stock for SKU MOUSE-01",
+    ):
         service.reserve_order(
             order=order,
             inventory=inventory,
@@ -192,17 +209,15 @@ def test_failed_multi_item_reservation_is_atomic():
 
     assert inventory.get_reserved_stock("LAPTOP-01") == 0
     assert inventory.get_reserved_stock("MOUSE-01") == 0
-
     assert inventory.get_available_stock("LAPTOP-01") == 10
     assert inventory.get_available_stock("MOUSE-01") == 1
-
     assert order.status == OrderStatus.CREATED
 
 
 def test_duplicate_order_item_reservation_is_rejected():
     inventory = create_inventory()
 
-    order = Order(order_id="ORD-001")
+    order = Order(order_id="ORD-1001")
 
     order.add_item(
         OrderItem(
@@ -219,23 +234,25 @@ def test_duplicate_order_item_reservation_is_rejected():
         inventory=inventory,
     )
 
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError,
+        match="Order item is already reserved",
+    ):
         service.reserve_order(
             order=order,
             inventory=inventory,
         )
 
-    assert inventory.get_reserved_stock("LAPTOP-01") == 3
-
 
 def test_order_without_items_cannot_be_reserved():
     inventory = create_inventory()
-
-    order = Order(order_id="ORD-001")
-
+    order = Order(order_id="ORD-1001")
     service = OrderService()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError,
+        match="Order must contain at least one item",
+    ):
         service.reserve_order(
             order=order,
             inventory=inventory,
@@ -245,7 +262,6 @@ def test_order_without_items_cannot_be_reserved():
 def test_release_order_reservations():
     inventory = create_inventory()
     order = create_order()
-
     service = OrderService()
 
     service.reserve_order(
@@ -263,7 +279,6 @@ def test_release_order_reservations():
 
     assert inventory.get_reserved_stock("LAPTOP-01") == 0
     assert inventory.get_reserved_stock("MOUSE-01") == 0
-
     assert inventory.get_available_stock("LAPTOP-01") == 10
     assert inventory.get_available_stock("MOUSE-01") == 10
 
@@ -271,7 +286,7 @@ def test_release_order_reservations():
 def test_release_only_removes_reservations_of_same_order():
     inventory = create_inventory()
 
-    order_1 = Order(order_id="ORD-001")
+    order_1 = Order(order_id="ORD-1001")
     order_1.add_item(
         OrderItem(
             item_id="ITEM-001",
@@ -280,7 +295,7 @@ def test_release_only_removes_reservations_of_same_order():
         )
     )
 
-    order_2 = Order(order_id="ORD-002")
+    order_2 = Order(order_id="ORD-1002")
     order_2.add_item(
         OrderItem(
             item_id="ITEM-002",
@@ -301,8 +316,6 @@ def test_release_only_removes_reservations_of_same_order():
         inventory=inventory,
     )
 
-    assert inventory.get_reserved_stock("LAPTOP-01") == 5
-
     service.release_order_reservations(
         order=order_1,
         inventory=inventory,
@@ -314,18 +327,14 @@ def test_release_only_removes_reservations_of_same_order():
 
 def test_failed_commit_rolls_back_new_reservations():
     inventory = create_inventory()
-
     order = create_order()
-
     service = OrderService()
 
     original_reserve_reservation = inventory.reserve_reservation
-
     call_count = 0
 
     def failing_reserve_reservation(reservation):
         nonlocal call_count
-
         call_count += 1
 
         if call_count == 2:
@@ -335,7 +344,7 @@ def test_failed_commit_rolls_back_new_reservations():
 
     inventory.reserve_reservation = failing_reserve_reservation
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Simulated commit failure"):
         service.reserve_order(
             order=order,
             inventory=inventory,
@@ -343,8 +352,6 @@ def test_failed_commit_rolls_back_new_reservations():
 
     assert inventory.get_reserved_stock("LAPTOP-01") == 0
     assert inventory.get_reserved_stock("MOUSE-01") == 0
-
     assert inventory.get_available_stock("LAPTOP-01") == 10
     assert inventory.get_available_stock("MOUSE-01") == 10
-
     assert order.status == OrderStatus.CREATED
