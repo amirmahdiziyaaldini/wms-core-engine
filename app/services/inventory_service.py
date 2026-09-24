@@ -45,6 +45,8 @@ class InventoryService:
         quantity: int,
         transaction_type: InventoryTransactionType,
         reference_id: str,
+        batch_id: str | None = None,
+        serial_numbers: list[str] | None = None,
     ) -> InventoryTransaction:
         transaction = InventoryTransaction(
             timestamp=timestamp,
@@ -53,6 +55,8 @@ class InventoryService:
             quantity=quantity,
             transaction_type=transaction_type,
             reference_id=reference_id,
+            batch_id=batch_id,
+            serial_numbers=serial_numbers,
         )
 
         self.ledger.record(transaction)
@@ -79,7 +83,9 @@ class InventoryService:
             raise ValueError("Quantity must be an integer")
 
         if quantity <= 0:
-            raise ValueError("Quantity must be greater than zero")
+            raise ValueError(
+                "Quantity must be greater than zero"
+            )
 
         if reference_date is not None and not isinstance(
             reference_date,
@@ -103,3 +109,173 @@ class InventoryService:
             quantity=quantity,
             reference_date=reference_date,
         )
+
+    def consume_reservation(
+        self,
+        inventory: Inventory,
+        reservation_id: str,
+        timestamp: datetime,
+    ) -> list[str]:
+        if not isinstance(inventory, Inventory):
+            raise ValueError("Inventory must be an Inventory")
+
+        if not isinstance(reservation_id, str):
+            raise ValueError(
+                "Reservation ID must be a string"
+            )
+
+        if not reservation_id.strip():
+            raise ValueError(
+                "Reservation ID cannot be empty"
+            )
+
+        if not isinstance(timestamp, datetime):
+            raise ValueError(
+                "Timestamp must be a datetime"
+            )
+
+        if reservation_id not in inventory.reservations:
+            raise ValueError(
+                "Reservation not found"
+            )
+
+        reservation = inventory.reservations[reservation_id]
+
+        allocations = reservation.batch_allocations
+
+        if not allocations:
+            raise ValueError(
+                "Reservation has no batch allocations"
+            )
+
+        allocated_quantity = sum(
+            allocations.values()
+        )
+
+        if allocated_quantity != reservation.quantity:
+            raise ValueError(
+                "Batch allocations do not match reservation quantity"
+            )
+
+        batches_by_id = {
+            batch.batch_id: batch
+            for batch in inventory.batches
+        }
+
+        prepared_operations = []
+        shipped_serial_numbers = []
+
+        for batch_id, quantity in allocations.items():
+            if batch_id not in batches_by_id:
+                raise ValueError(
+                    f"Batch {batch_id} not found"
+                )
+
+            batch = batches_by_id[batch_id]
+
+            if batch.product.sku != reservation.sku:
+                raise ValueError(
+                    "Allocated batch SKU does not match reservation SKU"
+                )
+
+            if not isinstance(quantity, int) or isinstance(
+                quantity,
+                bool,
+            ):
+                raise ValueError(
+                    "Allocated quantity must be an integer"
+                )
+
+            if quantity <= 0:
+                raise ValueError(
+                    "Allocated quantity must be greater than zero"
+                )
+
+            if batch.quantity < quantity:
+                raise ValueError(
+                    f"Insufficient stock in batch {batch.batch_id}"
+                )
+
+            batch_serial_numbers = []
+
+            if batch.serial_numbers is not None:
+                if len(batch.serial_numbers) < quantity:
+                    raise ValueError(
+                        f"Insufficient serial numbers in batch {batch.batch_id}"
+                    )
+
+                batch_serial_numbers = batch.serial_numbers[:quantity]
+
+            prepared_operations.append(
+                (
+                    batch,
+                    quantity,
+                    batch_serial_numbers,
+                )
+            )
+
+        original_quantities = {
+            batch.batch_id: batch.quantity
+            for batch, _, _ in prepared_operations
+        }
+
+        original_serial_numbers = {
+            batch.batch_id: (
+                list(batch.serial_numbers)
+                if batch.serial_numbers is not None
+                else None
+            )
+            for batch, _, _ in prepared_operations
+        }
+
+        recorded_transactions = []
+
+        try:
+            for batch, quantity, serial_numbers in prepared_operations:
+                batch.quantity -= quantity
+
+                if batch.serial_numbers is not None:
+                    batch.serial_numbers = batch.serial_numbers[
+                        quantity:
+                    ]
+
+                transaction = self.record_transaction(
+                    timestamp=timestamp,
+                    warehouse=inventory.warehouse,
+                    sku=reservation.sku,
+                    quantity=-quantity,
+                    transaction_type=InventoryTransactionType.SHIP,
+                    reference_id=reservation.order_id,
+                    batch_id=batch.batch_id,
+                    serial_numbers=serial_numbers,
+                )
+
+                recorded_transactions.append(transaction)
+                shipped_serial_numbers.extend(
+                    serial_numbers
+                )
+
+            inventory.release_reservation(
+                reservation.reservation_id
+            )
+
+        except Exception:
+            for batch in inventory.batches:
+                if batch.batch_id in original_quantities:
+                    batch.quantity = original_quantities[
+                        batch.batch_id
+                    ]
+
+                    batch.serial_numbers = original_serial_numbers[
+                        batch.batch_id
+                    ]
+
+            for transaction in recorded_transactions:
+                if transaction in self.ledger.transactions:
+                    self.ledger.transactions.remove(
+                        transaction
+                    )
+
+            raise
+
+        return shipped_serial_numbers

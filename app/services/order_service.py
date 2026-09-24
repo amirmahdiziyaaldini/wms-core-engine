@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from app.domain.enums.order_status import OrderStatus
 from app.domain.models.inventory import Inventory
@@ -151,3 +151,57 @@ class OrderService:
             inventory.release_reservation(
                 reservation_id
             )
+
+    def ship_order(
+        self,
+        order: Order,
+        inventory: Inventory,
+        timestamp: datetime,
+    ) -> list[str]:
+        if not isinstance(order, Order):
+            raise ValueError("Order must be an Order")
+
+        if not isinstance(inventory, Inventory):
+            raise ValueError("Inventory must be an Inventory")
+
+        if not isinstance(timestamp, datetime):
+            raise ValueError(
+                "Timestamp must be a datetime"
+            )
+
+        if order.status != OrderStatus.PAID:
+            raise ValueError(
+                "Only paid orders can be shipped"
+            )
+
+        order_reservations = []
+
+        for reservation in inventory.reservations.values():
+            if reservation.order_id == order.order_id:
+                order_reservations.append(
+                    reservation
+                )
+
+        if not order_reservations:
+            raise ValueError(
+                "Order has no active reservations"
+            )
+
+        shipped_serial_numbers = []
+
+        for reservation in order_reservations:
+            serial_numbers = (
+                self.inventory_service.consume_reservation(
+                    inventory=inventory,
+                    reservation_id=reservation.reservation_id,
+                    timestamp=timestamp,
+                )
+            )
+
+            shipped_serial_numbers.extend(
+                serial_numbers
+            )
+
+        order.status = OrderStatus.SHIPPED
+
+        return shipped_serial_numbers
