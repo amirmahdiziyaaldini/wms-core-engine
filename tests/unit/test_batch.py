@@ -30,18 +30,51 @@ def create_serialized_product():
 
 def test_create_batch():
     product = create_base_product()
+    entry_date = date(2026, 9, 1)
 
     batch = Batch(
         batch_id="BATCH-001",
         product=product,
         quantity=10,
+        entry_date=entry_date,
     )
 
     assert batch.batch_id == "BATCH-001"
     assert batch.product is product
     assert batch.quantity == 10
+    assert batch.entry_date == entry_date
     assert batch.expiry_date is None
     assert batch.serial_numbers is None
+
+
+def test_batch_requires_entry_date():
+    product = create_base_product()
+
+    with pytest.raises(
+        ValueError,
+        match="Entry date must be a date",
+    ):
+        Batch(
+            batch_id="BATCH-001",
+            product=product,
+            quantity=10,
+            entry_date=None,
+        )
+
+
+def test_batch_entry_date_must_be_date():
+    product = create_base_product()
+
+    with pytest.raises(
+        ValueError,
+        match="Entry date must be a date",
+    ):
+        Batch(
+            batch_id="BATCH-001",
+            product=product,
+            quantity=10,
+            entry_date="2026-09-01",
+        )
 
 
 def test_create_perishable_batch_requires_expiry_date():
@@ -63,6 +96,7 @@ def test_create_perishable_batch_requires_expiry_date():
             batch_id="BATCH-001",
             product=product,
             quantity=10,
+            entry_date=date(2026, 9, 1),
         )
 
 
@@ -77,15 +111,18 @@ def test_create_perishable_batch_with_expiry_date():
 
     product.expiry_tracking = True
 
+    entry_date = date(2026, 9, 1)
     expiry_date = date(2026, 12, 31)
 
     batch = Batch(
         batch_id="BATCH-001",
         product=product,
         quantity=10,
+        entry_date=entry_date,
         expiry_date=expiry_date,
     )
 
+    assert batch.entry_date == entry_date
     assert batch.expiry_date == expiry_date
 
 
@@ -96,6 +133,7 @@ def test_expired_batch():
         batch_id="BATCH-001",
         product=product,
         quantity=10,
+        entry_date=date(2026, 1, 1),
         expiry_date=date(2026, 1, 1),
     )
 
@@ -111,6 +149,7 @@ def test_non_expired_batch():
         batch_id="BATCH-001",
         product=product,
         quantity=10,
+        entry_date=date(2026, 6, 1),
         expiry_date=date(2026, 12, 31),
     )
 
@@ -126,6 +165,7 @@ def test_regular_product_batch_is_not_expired():
         batch_id="BATCH-001",
         product=product,
         quantity=10,
+        entry_date=date(2026, 6, 1),
     )
 
     assert batch.is_expired(
@@ -144,6 +184,7 @@ def test_batch_id_must_be_string():
             batch_id=1001,
             product=product,
             quantity=10,
+            entry_date=date(2026, 9, 1),
         )
 
 
@@ -158,6 +199,7 @@ def test_batch_id_cannot_be_empty():
             batch_id="",
             product=product,
             quantity=10,
+            entry_date=date(2026, 9, 1),
         )
 
 
@@ -170,6 +212,7 @@ def test_product_must_be_base_product():
             batch_id="BATCH-001",
             product="BOOK-001",
             quantity=10,
+            entry_date=date(2026, 9, 1),
         )
 
 
@@ -184,6 +227,7 @@ def test_quantity_must_be_integer():
             batch_id="BATCH-001",
             product=product,
             quantity="10",
+            entry_date=date(2026, 9, 1),
         )
 
 
@@ -198,6 +242,7 @@ def test_quantity_must_be_greater_than_zero():
             batch_id="BATCH-001",
             product=product,
             quantity=0,
+            entry_date=date(2026, 9, 1),
         )
 
 
@@ -212,6 +257,7 @@ def test_quantity_cannot_be_negative():
             batch_id="BATCH-001",
             product=product,
             quantity=-5,
+            entry_date=date(2026, 9, 1),
         )
 
 
@@ -226,6 +272,7 @@ def test_expiry_date_must_be_date():
             batch_id="BATCH-001",
             product=product,
             quantity=10,
+            entry_date=date(2026, 9, 1),
             expiry_date="2026-12-31",
         )
 
@@ -241,6 +288,7 @@ def test_serialized_product_batch_requires_serial_numbers():
             batch_id="BATCH-001",
             product=product,
             quantity=2,
+            entry_date=date(2026, 9, 1),
         )
 
 
@@ -255,6 +303,7 @@ def test_serial_numbers_count_must_match_quantity():
             batch_id="BATCH-001",
             product=product,
             quantity=3,
+            entry_date=date(2026, 9, 1),
             serial_numbers=[
                 "SN-1001",
                 "SN-1002",
@@ -269,6 +318,7 @@ def test_serialized_batch_can_be_created_with_correct_serial_numbers():
         batch_id="BATCH-001",
         product=product,
         quantity=3,
+        entry_date=date(2026, 9, 1),
         serial_numbers=[
             "SN-1001",
             "SN-1002",
@@ -294,6 +344,7 @@ def test_serial_numbers_must_be_a_list():
             batch_id="BATCH-001",
             product=product,
             quantity=1,
+            entry_date=date(2026, 9, 1),
             serial_numbers="SN-1001",
         )
 
@@ -309,6 +360,7 @@ def test_serial_number_must_be_a_string():
             batch_id="BATCH-001",
             product=product,
             quantity=1,
+            entry_date=date(2026, 9, 1),
             serial_numbers=[1001],
         )
 
@@ -324,6 +376,7 @@ def test_serial_number_cannot_be_empty():
             batch_id="BATCH-001",
             product=product,
             quantity=1,
+            entry_date=date(2026, 9, 1),
             serial_numbers=[""],
         )
 
@@ -339,6 +392,7 @@ def test_serial_number_cannot_contain_only_whitespace():
             batch_id="BATCH-001",
             product=product,
             quantity=1,
+            entry_date=date(2026, 9, 1),
             serial_numbers=["   "],
         )
 
@@ -354,6 +408,7 @@ def test_serial_numbers_must_be_unique():
             batch_id="BATCH-001",
             product=product,
             quantity=3,
+            entry_date=date(2026, 9, 1),
             serial_numbers=[
                 "SN-1001",
                 "SN-1002",
@@ -369,6 +424,7 @@ def test_serialized_batch_accepts_multiple_unique_serial_numbers():
         batch_id="BATCH-001",
         product=product,
         quantity=4,
+        entry_date=date(2026, 9, 1),
         serial_numbers=[
             "SN-1001",
             "SN-1002",
@@ -388,6 +444,7 @@ def test_non_serialized_product_can_have_no_serial_numbers():
         batch_id="BATCH-001",
         product=product,
         quantity=5,
+        entry_date=date(2026, 9, 1),
     )
 
     assert batch.serial_numbers is None
