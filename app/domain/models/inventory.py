@@ -33,6 +33,16 @@ class Inventory:
 
         return total
 
+    def physical_stock(self, sku: str) -> int:
+     return self.get_physical_stock(sku)
+
+
+    def physical_stock(self, sku: str) -> int:
+       return self.get_physical_stock(sku)
+
+    def available_stock(self, sku: str) -> int:
+      return self.get_available_stock(sku)
+
     def get_reserved_stock(self, sku: str) -> int:
         if not isinstance(sku, str):
             raise ValueError("SKU must be a string")
