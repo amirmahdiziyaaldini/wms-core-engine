@@ -34,14 +34,7 @@ class Inventory:
         return total
 
     def physical_stock(self, sku: str) -> int:
-     return self.get_physical_stock(sku)
-
-
-    def physical_stock(self, sku: str) -> int:
-       return self.get_physical_stock(sku)
-
-    def available_stock(self, sku: str) -> int:
-      return self.get_available_stock(sku)
+        return self.get_physical_stock(sku)
 
     def get_reserved_stock(self, sku: str) -> int:
         if not isinstance(sku, str):
@@ -69,6 +62,9 @@ class Inventory:
 
         return available_stock
 
+    def available_stock(self, sku: str) -> int:
+        return self.get_available_stock(sku)
+
     def reserve(
         self,
         reservation_id: str,
@@ -76,49 +72,30 @@ class Inventory:
         quantity: int,
     ):
         if not isinstance(reservation_id, str):
-            raise ValueError(
-                "Reservation ID must be a string"
-            )
+            raise ValueError("Reservation ID must be a string")
 
         if not reservation_id.strip():
-            raise ValueError(
-                "Reservation ID cannot be empty"
-            )
+            raise ValueError("Reservation ID cannot be empty")
 
         if not isinstance(sku, str):
-            raise ValueError(
-                "SKU must be a string"
-            )
+            raise ValueError("SKU must be a string")
 
         if not sku.strip():
-            raise ValueError(
-                "SKU cannot be empty"
-            )
+            raise ValueError("SKU cannot be empty")
 
-        if not isinstance(quantity, int) or isinstance(
-            quantity,
-            bool,
-        ):
-            raise ValueError(
-                "Quantity must be an integer"
-            )
+        if not isinstance(quantity, int) or isinstance(quantity, bool):
+            raise ValueError("Quantity must be an integer")
 
         if quantity <= 0:
-            raise ValueError(
-                "Quantity must be greater than zero"
-            )
+            raise ValueError("Quantity must be greater than zero")
 
         if reservation_id in self.reservations:
-            raise ValueError(
-                "Reservation ID already exists"
-            )
+            raise ValueError("Reservation ID already exists")
 
         available_stock = self.get_available_stock(sku)
 
         if quantity > available_stock:
-            raise ValueError(
-                "Insufficient available stock"
-            )
+            raise ValueError("Insufficient available stock")
 
         reservation = Reservation(
             reservation_id=reservation_id,
@@ -135,23 +112,17 @@ class Inventory:
         reservation: Reservation,
     ):
         if not isinstance(reservation, Reservation):
-            raise ValueError(
-                "Reservation must be a Reservation"
-            )
+            raise ValueError("Reservation must be a Reservation")
 
         if reservation.reservation_id in self.reservations:
-            raise ValueError(
-                "Reservation ID already exists"
-            )
+            raise ValueError("Reservation ID already exists")
 
         available_stock = self.get_available_stock(
             reservation.sku
         )
 
         if reservation.quantity > available_stock:
-            raise ValueError(
-                "Insufficient available stock"
-            )
+            raise ValueError("Insufficient available stock")
 
         self.reservations[
             reservation.reservation_id
@@ -162,18 +133,12 @@ class Inventory:
         reservation_id: str,
     ):
         if not isinstance(reservation_id, str):
-            raise ValueError(
-                "Reservation ID must be a string"
-            )
+            raise ValueError("Reservation ID must be a string")
 
         if not reservation_id.strip():
-            raise ValueError(
-                "Reservation ID cannot be empty"
-            )
+            raise ValueError("Reservation ID cannot be empty")
 
         if reservation_id not in self.reservations:
-            raise ValueError(
-                "Reservation not found"
-            )
+            raise ValueError("Reservation not found")
 
         del self.reservations[reservation_id]

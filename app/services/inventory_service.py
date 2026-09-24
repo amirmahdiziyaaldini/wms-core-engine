@@ -3,6 +3,7 @@ from datetime import date, datetime
 from app.domain.enums.inventory_transaction_type import (
     InventoryTransactionType,
 )
+from app.domain.enums.warehouse_type import WarehouseType
 from app.domain.models.inventory import Inventory
 from app.domain.models.inventory_ledger import InventoryLedger
 from app.domain.models.inventory_transaction import InventoryTransaction
@@ -140,7 +141,6 @@ class InventoryService:
             )
 
         reservation = inventory.reservations[reservation_id]
-
         allocations = reservation.batch_allocations
 
         if not allocations:
@@ -279,3 +279,147 @@ class InventoryService:
             raise
 
         return shipped_serial_numbers
+
+    def get_inventory_report(
+        self,
+        inventory: Inventory,
+        sku: str,
+        reference_date: date | None = None,
+        low_stock_threshold: int | None = None,
+    ) -> dict[str, int | str | bool | None]:
+        if not isinstance(inventory, Inventory):
+            raise ValueError("Inventory must be an Inventory")
+
+        if not isinstance(sku, str):
+            raise ValueError("SKU must be a string")
+
+        if not sku.strip():
+            raise ValueError("SKU cannot be empty")
+
+        if reference_date is None:
+            reference_date = date.today()
+
+        if not isinstance(reference_date, date):
+            raise ValueError("Reference date must be a date")
+
+        if low_stock_threshold is not None:
+            if not isinstance(
+                low_stock_threshold,
+                int,
+            ) or isinstance(
+                low_stock_threshold,
+                bool,
+            ):
+                raise ValueError(
+                    "Low stock threshold must be an integer"
+                )
+
+            if low_stock_threshold < 0:
+                raise ValueError(
+                    "Low stock threshold cannot be negative"
+                )
+
+        physical = inventory.get_physical_stock(sku)
+        reserved = inventory.get_reserved_stock(sku)
+        available = inventory.get_available_stock(sku)
+
+        expired = 0
+
+        for batch in inventory.batches:
+            if batch.product.sku != sku:
+                continue
+
+            if batch.is_expired(reference_date):
+                expired += batch.quantity
+
+        quarantine = 0
+
+        if (
+            inventory.warehouse.warehouse_type
+            == WarehouseType.SCRAP_QUARANTINE
+        ):
+            quarantine = physical
+
+        in_transit = self._get_in_transit_stock(
+            inventory,
+            sku,
+        )
+
+        low_stock = None
+
+        if low_stock_threshold is not None:
+            low_stock = available < low_stock_threshold
+
+        return {
+            "warehouse_id": inventory.warehouse.warehouse_id,
+            "sku": sku,
+            "physical": physical,
+            "reserved": reserved,
+            "available": available,
+            "in_transit": in_transit,
+            "expired": expired,
+            "quarantine": quarantine,
+            "low_stock_threshold": low_stock_threshold,
+            "low_stock": low_stock,
+        }
+
+    def get_inventory_report_for_all_warehouses(
+        self,
+        inventories: list[Inventory],
+        sku: str,
+        reference_date: date | None = None,
+        low_stock_threshold: int | None = None,
+    ) -> list[dict[str, int | str | bool | None]]:
+        if not isinstance(inventories, list):
+            raise ValueError(
+                "Inventories must be a list"
+            )
+
+        for inventory in inventories:
+            if not isinstance(inventory, Inventory):
+                raise ValueError(
+                    "Every inventory must be an Inventory"
+                )
+
+        return [
+            self.get_inventory_report(
+                inventory=inventory,
+                sku=sku,
+                reference_date=reference_date,
+                low_stock_threshold=low_stock_threshold,
+            )
+            for inventory in inventories
+        ]
+
+    def _get_in_transit_stock(
+        self,
+        inventory: Inventory,
+        sku: str,
+    ) -> int:
+        received_transfer_ids = {
+            transaction.reference_id
+            for transaction in self.ledger.transactions
+            if transaction.transaction_type
+            == InventoryTransactionType.TRANSFER_IN
+        }
+
+        total = 0
+
+        for transaction in self.ledger.transactions:
+            if transaction.transaction_type != (
+                InventoryTransactionType.TRANSFER_OUT
+            ):
+                continue
+
+            if transaction.warehouse != inventory.warehouse:
+                continue
+
+            if transaction.sku != sku:
+                continue
+
+            if transaction.reference_id in received_transfer_ids:
+                continue
+
+            total += abs(transaction.quantity)
+
+        return total
