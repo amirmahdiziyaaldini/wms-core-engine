@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 
 from app.domain.enums.order_status import OrderStatus
@@ -10,6 +11,8 @@ class Order:
         self,
         order_id: str,
         status: OrderStatus = OrderStatus.CREATED,
+        customer_id: str | None = None,
+        created_at: datetime | None = None,
     ):
         if not isinstance(order_id, str):
             raise ValueError(
@@ -26,15 +29,67 @@ class Order:
                 "Status must be an OrderStatus"
             )
 
+        if customer_id is not None:
+            if not isinstance(customer_id, str):
+                raise ValueError(
+                    "Customer ID must be a string"
+                )
+
+            if not customer_id.strip():
+                raise ValueError(
+                    "Customer ID cannot be empty"
+                )
+
+        if created_at is not None:
+            if not isinstance(created_at, datetime):
+                raise ValueError(
+                    "Created at must be a datetime"
+                )
+
         self.order_id = order_id
+        self.customer_id = customer_id
         self.status = status
+        self.created_at = (
+            created_at
+            if created_at is not None
+            else datetime.now()
+        )
+
+        self.reserved_at: datetime | None = None
+        self.paid_at: datetime | None = None
+        self.shipped_at: datetime | None = None
+        self.completed_at: datetime | None = None
+
         self.items: list[OrderItem] = []
-        self.total: Decimal | None = None
+
+    @property
+    def total_amount(self) -> Decimal | None:
+        if not self.items:
+            return None
+
+        line_totals = []
+
+        for item in self.items:
+            if item.line_total is None:
+                return None
+
+            line_totals.append(
+                item.line_total
+            )
+
+        return sum(
+            line_totals,
+            Decimal("0"),
+        )
+
+    @property
+    def total(self) -> Decimal | None:
+        return self.total_amount
 
     def add_item(
         self,
         item: OrderItem,
-    ):
+    ) -> None:
         if not isinstance(item, OrderItem):
             raise ValueError(
                 "Item must be an OrderItem"
@@ -49,31 +104,14 @@ class Order:
         self.items.append(item)
 
     def calculate_total(self) -> Decimal:
-        if not self.items:
+        total = self.total_amount
+
+        if total is None:
             raise ValueError(
-                "Order must contain at least one item"
+                "Order total cannot be calculated before all items are priced"
             )
 
-        for item in self.items:
-            if item.unit_price is None:
-                raise ValueError(
-                    "All order items must have a price snapshot"
-                )
-
-        self.total = sum(
-            (
-                item.get_line_total()
-                for item in self.items
-            ),
-            Decimal("0"),
-        )
-
-        return self.total
+        return total
 
     def get_total(self) -> Decimal:
-        if self.total is None:
-            raise ValueError(
-                "Order total has not been calculated"
-            )
-
-        return self.total
+        return self.calculate_total()
