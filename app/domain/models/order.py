@@ -48,7 +48,8 @@ class Order:
 
         self.order_id = order_id
         self.customer_id = customer_id
-        self.status = status
+        self._status = status
+
         self.created_at = (
             created_at
             if created_at is not None
@@ -59,8 +60,42 @@ class Order:
         self.paid_at: datetime | None = None
         self.shipped_at: datetime | None = None
         self.completed_at: datetime | None = None
+        self.cancelled_at: datetime | None = None
 
         self.items: list[OrderItem] = []
+
+    @property
+    def status(self) -> OrderStatus:
+        return self._status
+
+    def _set_status(
+        self,
+        status: OrderStatus,
+        timestamp: datetime,
+    ) -> None:
+        if not isinstance(status, OrderStatus):
+            raise ValueError(
+                "Status must be an OrderStatus"
+            )
+
+        if not isinstance(timestamp, datetime):
+            raise ValueError(
+                "Timestamp must be a datetime"
+            )
+
+        self._status = status
+
+        if status == OrderStatus.PAID:
+            self.paid_at = timestamp
+
+        elif status == OrderStatus.SHIPPED:
+            self.shipped_at = timestamp
+
+        elif status == OrderStatus.DELIVERED:
+            self.completed_at = timestamp
+
+        elif status == OrderStatus.CANCELLED:
+            self.cancelled_at = timestamp
 
     @property
     def total_amount(self) -> Decimal | None:

@@ -6,6 +6,7 @@ from app.domain.models.inventory_ledger import InventoryLedger
 from app.domain.models.order import Order
 from app.domain.models.reservation import Reservation
 from app.domain.models.sales_rule_context import SalesRuleContext
+from app.domain.states.order_state_machine import OrderStateMachine
 from app.services.inventory_service import InventoryService
 from app.services.pricing_service import PricingService
 from app.services.sales_rule_engine import SalesRuleEngine
@@ -18,6 +19,7 @@ class OrderService:
         inventory_service: InventoryService | None = None,
         sales_rule_engine: SalesRuleEngine | None = None,
         pricing_service: PricingService | None = None,
+        order_state_machine: OrderStateMachine | None = None,
     ):
         if inventory_service is not None and not isinstance(
             inventory_service,
@@ -43,6 +45,14 @@ class OrderService:
                 "Pricing service must be a PricingService"
             )
 
+        if order_state_machine is not None and not isinstance(
+            order_state_machine,
+            OrderStateMachine,
+        ):
+            raise ValueError(
+                "Order state machine must be an OrderStateMachine"
+            )
+
         if inventory_service is None:
             inventory_service = InventoryService(
                 InventoryLedger()
@@ -54,9 +64,13 @@ class OrderService:
         if pricing_service is None:
             pricing_service = PricingService()
 
+        if order_state_machine is None:
+            order_state_machine = OrderStateMachine()
+
         self.inventory_service = inventory_service
         self.sales_rule_engine = sales_rule_engine
         self.pricing_service = pricing_service
+        self.order_state_machine = order_state_machine
 
     def reserve_order(
         self,
@@ -174,7 +188,10 @@ class OrderService:
 
             raise
 
-        order.status = OrderStatus.RESERVED
+        self.order_state_machine.transition(
+            order,
+            OrderStatus.RESERVED,
+        )
 
         return reservations
 
@@ -262,6 +279,9 @@ class OrderService:
                 serial_numbers
             )
 
-        order.status = OrderStatus.SHIPPED
+        self.order_state_machine.transition(
+            order,
+            OrderStatus.SHIPPED,
+        )
 
         return shipped_serial_numbers
