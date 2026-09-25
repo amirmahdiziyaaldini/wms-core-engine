@@ -10,10 +10,19 @@ from app.strategies.pricing.tiered_pricing_strategy import (
 
 
 class PricingService:
+
     def __init__(
         self,
         pricing_strategy: PricingStrategy | None = None,
     ):
+        if pricing_strategy is not None and not isinstance(
+            pricing_strategy,
+            PricingStrategy,
+        ):
+            raise ValueError(
+                "Pricing strategy must be a PricingStrategy"
+            )
+
         self.pricing_strategy = (
             pricing_strategy
             if pricing_strategy is not None
@@ -72,9 +81,11 @@ class PricingService:
                     f"Product not found for SKU {item.sku}"
                 )
 
-            unit_price = self.pricing_strategy.calculate_unit_price(
-                product=product,
-                quantity=item.quantity,
+            unit_price = (
+                self.pricing_strategy.calculate_unit_price(
+                    product=product,
+                    quantity=item.quantity,
+                )
             )
 
             calculated_prices.append(
@@ -83,3 +94,5 @@ class PricingService:
 
         for item, unit_price in calculated_prices:
             item.set_unit_price(unit_price)
+
+        order.calculate_total()
