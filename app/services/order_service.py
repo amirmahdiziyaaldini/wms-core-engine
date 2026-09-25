@@ -5,13 +5,16 @@ from app.domain.models.inventory import Inventory
 from app.domain.models.inventory_ledger import InventoryLedger
 from app.domain.models.order import Order
 from app.domain.models.reservation import Reservation
+from app.domain.models.sales_rule_context import SalesRuleContext
 from app.services.inventory_service import InventoryService
+from app.services.sales_rule_engine import SalesRuleEngine
 
 
 class OrderService:
     def __init__(
         self,
         inventory_service: InventoryService | None = None,
+        sales_rule_engine: SalesRuleEngine | None = None,
     ):
         if inventory_service is not None and not isinstance(
             inventory_service,
@@ -21,18 +24,32 @@ class OrderService:
                 "Inventory service must be an InventoryService"
             )
 
+        if sales_rule_engine is not None and not isinstance(
+            sales_rule_engine,
+            SalesRuleEngine,
+        ):
+            raise ValueError(
+                "Sales rule engine must be a SalesRuleEngine"
+            )
+
         if inventory_service is None:
             inventory_service = InventoryService(
                 InventoryLedger()
             )
 
+        if sales_rule_engine is None:
+            sales_rule_engine = SalesRuleEngine()
+
         self.inventory_service = inventory_service
+        self.sales_rule_engine = sales_rule_engine
 
     def reserve_order(
         self,
         order: Order,
         inventory: Inventory,
         reference_date: date | None = None,
+        catalog=None,
+        customer=None,
     ) -> list[Reservation]:
         if not isinstance(order, Order):
             raise ValueError("Order must be an Order")
@@ -52,6 +69,14 @@ class OrderService:
             raise ValueError(
                 "Reference date must be a date"
             )
+
+        rule_context = SalesRuleContext(
+            order=order,
+            catalog=catalog,
+            customer=customer,
+        )
+
+        self.sales_rule_engine.validate(rule_context)
 
         for item in order.items:
             for reservation in inventory.reservations.values():
