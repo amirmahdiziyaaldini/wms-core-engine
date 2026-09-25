@@ -5,13 +5,19 @@ from app.domain.models.inventory import Inventory
 from app.domain.models.inventory_ledger import InventoryLedger
 from app.domain.models.order import Order
 from app.domain.models.reservation import Reservation
+from app.domain.models.sales_rule_context import SalesRuleContext
 from app.services.inventory_service import InventoryService
+from app.services.pricing_service import PricingService
+from app.services.sales_rule_engine import SalesRuleEngine
 
 
 class OrderService:
+
     def __init__(
         self,
         inventory_service: InventoryService | None = None,
+        sales_rule_engine: SalesRuleEngine | None = None,
+        pricing_service: PricingService | None = None,
     ):
         if inventory_service is not None and not isinstance(
             inventory_service,
@@ -21,24 +27,54 @@ class OrderService:
                 "Inventory service must be an InventoryService"
             )
 
+        if sales_rule_engine is not None and not isinstance(
+            sales_rule_engine,
+            SalesRuleEngine,
+        ):
+            raise ValueError(
+                "Sales rule engine must be a SalesRuleEngine"
+            )
+
+        if pricing_service is not None and not isinstance(
+            pricing_service,
+            PricingService,
+        ):
+            raise ValueError(
+                "Pricing service must be a PricingService"
+            )
+
         if inventory_service is None:
             inventory_service = InventoryService(
                 InventoryLedger()
             )
 
+        if sales_rule_engine is None:
+            sales_rule_engine = SalesRuleEngine()
+
+        if pricing_service is None:
+            pricing_service = PricingService()
+
         self.inventory_service = inventory_service
+        self.sales_rule_engine = sales_rule_engine
+        self.pricing_service = pricing_service
 
     def reserve_order(
         self,
         order: Order,
         inventory: Inventory,
         reference_date: date | None = None,
+        catalog=None,
+        customer=None,
     ) -> list[Reservation]:
         if not isinstance(order, Order):
-            raise ValueError("Order must be an Order")
+            raise ValueError(
+                "Order must be an Order"
+            )
 
         if not isinstance(inventory, Inventory):
-            raise ValueError("Inventory must be an Inventory")
+            raise ValueError(
+                "Inventory must be an Inventory"
+            )
 
         if not order.items:
             raise ValueError(
@@ -51,6 +87,22 @@ class OrderService:
         ):
             raise ValueError(
                 "Reference date must be a date"
+            )
+
+        rule_context = SalesRuleContext(
+            order=order,
+            catalog=catalog,
+            customer=customer,
+        )
+
+        self.sales_rule_engine.validate(
+            rule_context
+        )
+
+        if catalog is not None:
+            self.pricing_service.price_order(
+                order=order,
+                products_by_sku=catalog,
             )
 
         for item in order.items:
@@ -98,7 +150,9 @@ class OrderService:
                 batch_allocations=batch_allocations,
             )
 
-            reservations.append(reservation)
+            reservations.append(
+                reservation
+            )
 
         committed_reservations = []
 
@@ -130,7 +184,9 @@ class OrderService:
         inventory: Inventory,
     ) -> None:
         if not isinstance(order, Order):
-            raise ValueError("Order must be an Order")
+            raise ValueError(
+                "Order must be an Order"
+            )
 
         if not isinstance(inventory, Inventory):
             raise ValueError(
@@ -159,10 +215,14 @@ class OrderService:
         timestamp: datetime,
     ) -> list[str]:
         if not isinstance(order, Order):
-            raise ValueError("Order must be an Order")
+            raise ValueError(
+                "Order must be an Order"
+            )
 
         if not isinstance(inventory, Inventory):
-            raise ValueError("Inventory must be an Inventory")
+            raise ValueError(
+                "Inventory must be an Inventory"
+            )
 
         if not isinstance(timestamp, datetime):
             raise ValueError(

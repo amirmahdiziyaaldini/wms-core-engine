@@ -1,8 +1,11 @@
+from decimal import Decimal
+
 from app.domain.enums.order_status import OrderStatus
 from app.domain.models.order_item import OrderItem
 
 
 class Order:
+
     def __init__(
         self,
         order_id: str,
@@ -26,8 +29,12 @@ class Order:
         self.order_id = order_id
         self.status = status
         self.items: list[OrderItem] = []
+        self.total: Decimal | None = None
 
-    def add_item(self, item: OrderItem):
+    def add_item(
+        self,
+        item: OrderItem,
+    ):
         if not isinstance(item, OrderItem):
             raise ValueError(
                 "Item must be an OrderItem"
@@ -40,3 +47,33 @@ class Order:
                 )
 
         self.items.append(item)
+
+    def calculate_total(self) -> Decimal:
+        if not self.items:
+            raise ValueError(
+                "Order must contain at least one item"
+            )
+
+        for item in self.items:
+            if item.unit_price is None:
+                raise ValueError(
+                    "All order items must have a price snapshot"
+                )
+
+        self.total = sum(
+            (
+                item.get_line_total()
+                for item in self.items
+            ),
+            Decimal("0"),
+        )
+
+        return self.total
+
+    def get_total(self) -> Decimal:
+        if self.total is None:
+            raise ValueError(
+                "Order total has not been calculated"
+            )
+
+        return self.total
