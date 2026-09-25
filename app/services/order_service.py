@@ -7,6 +7,8 @@ from app.domain.models.order import Order
 from app.domain.models.reservation import Reservation
 from app.domain.models.sales_rule_context import SalesRuleContext
 from app.domain.states.order_state_machine import OrderStateMachine
+from app.repositories.order_repository import OrderRepository
+from app.repositories.product_repository import ProductRepository
 from app.services.inventory_service import InventoryService
 from app.services.pricing_service import PricingService
 from app.services.sales_rule_engine import SalesRuleEngine
@@ -20,6 +22,8 @@ class OrderService:
         sales_rule_engine: SalesRuleEngine | None = None,
         pricing_service: PricingService | None = None,
         order_state_machine: OrderStateMachine | None = None,
+        order_repository: OrderRepository | None = None,
+        product_repository: ProductRepository | None = None,
     ):
         if inventory_service is not None and not isinstance(
             inventory_service,
@@ -53,6 +57,22 @@ class OrderService:
                 "Order state machine must be an OrderStateMachine"
             )
 
+        if order_repository is not None and not isinstance(
+            order_repository,
+            OrderRepository,
+        ):
+            raise ValueError(
+                "Order repository must be an OrderRepository"
+            )
+
+        if product_repository is not None and not isinstance(
+            product_repository,
+            ProductRepository,
+        ):
+            raise ValueError(
+                "Product repository must be a ProductRepository"
+            )
+
         if inventory_service is None:
             inventory_service = InventoryService(
                 InventoryLedger()
@@ -67,10 +87,120 @@ class OrderService:
         if order_state_machine is None:
             order_state_machine = OrderStateMachine()
 
+        if order_repository is None:
+            order_repository = OrderRepository()
+
+        if product_repository is None:
+            product_repository = ProductRepository()
+
         self.inventory_service = inventory_service
         self.sales_rule_engine = sales_rule_engine
         self.pricing_service = pricing_service
         self.order_state_machine = order_state_machine
+        self.order_repository = order_repository
+        self.product_repository = product_repository
+
+    def create_order(
+        self,
+        order: Order,
+        inventory: Inventory,
+        reference_date: date | None = None,
+        catalog=None,
+        customer=None,
+    ) -> list[Reservation]:
+        if not isinstance(order, Order):
+            raise ValueError(
+                "Order must be an Order"
+            )
+
+        if not isinstance(inventory, Inventory):
+            raise ValueError(
+                "Inventory must be an Inventory"
+            )
+
+        if not order.items:
+            raise ValueError(
+                "Order must contain at least one item"
+            )
+
+        if reference_date is not None and not isinstance(
+            reference_date,
+            date,
+        ):
+            raise ValueError(
+                "Reference date must be a date"
+            )
+
+        if self.order_repository.exists(
+            order.order_id
+        ):
+            raise ValueError(
+                f"Order already exists: {order.order_id}"
+            )
+
+        if catalog is None:
+            catalog = {}
+
+            for item in order.items:
+                product = self.product_repository.get(
+                    item.sku
+                )
+
+                if product is None:
+                    raise ValueError(
+                        f"Product not found for SKU {item.sku}"
+                    )
+
+                catalog[item.sku] = product
+
+        for item in order.items:
+            if item.sku not in catalog:
+                raise ValueError(
+                    f"Product not found for SKU {item.sku}"
+                )
+
+        rule_context = SalesRuleContext(
+            order=order,
+            catalog=catalog,
+            customer=customer,
+        )
+
+        self.sales_rule_engine.validate(
+            rule_context
+        )
+
+        self.pricing_service.price_order(
+            order=order,
+            products_by_sku=catalog,
+        )
+
+        reservations = []
+
+        try:
+            reservations = self.reserve_order(
+                order=order,
+                inventory=inventory,
+                reference_date=reference_date,
+                catalog=catalog,
+                customer=customer,
+            )
+
+            self.order_repository.save(
+                order
+            )
+
+        except Exception:
+            for reservation in reservations:
+                if reservation.reservation_id in (
+                    inventory.reservations
+                ):
+                    inventory.release_reservation(
+                        reservation.reservation_id
+                    )
+
+            raise
+
+        return reservations
 
     def reserve_order(
         self,
