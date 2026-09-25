@@ -1,13 +1,18 @@
 from datetime import date, datetime
+from decimal import Decimal
 
 from app.domain.enums.order_status import OrderStatus
 from app.domain.models.inventory import Inventory
 from app.domain.models.inventory_ledger import InventoryLedger
 from app.domain.models.order import Order
+from app.domain.models.payment_transaction import PaymentTransaction
 from app.domain.models.reservation import Reservation
 from app.domain.models.sales_rule_context import SalesRuleContext
 from app.domain.states.order_state_machine import OrderStateMachine
 from app.repositories.order_repository import OrderRepository
+from app.repositories.payment_transaction_repository import (
+    PaymentTransactionRepository,
+)
 from app.repositories.product_repository import ProductRepository
 from app.services.inventory_service import InventoryService
 from app.services.pricing_service import PricingService
@@ -24,6 +29,9 @@ class OrderService:
         order_state_machine: OrderStateMachine | None = None,
         order_repository: OrderRepository | None = None,
         product_repository: ProductRepository | None = None,
+        payment_transaction_repository: (
+            PaymentTransactionRepository | None
+        ) = None,
     ):
         if inventory_service is not None and not isinstance(
             inventory_service,
@@ -73,6 +81,18 @@ class OrderService:
                 "Product repository must be a ProductRepository"
             )
 
+        if (
+            payment_transaction_repository is not None
+            and not isinstance(
+                payment_transaction_repository,
+                PaymentTransactionRepository,
+            )
+        ):
+            raise ValueError(
+                "Payment transaction repository must be a "
+                "PaymentTransactionRepository"
+            )
+
         if inventory_service is None:
             inventory_service = InventoryService(
                 InventoryLedger()
@@ -93,12 +113,20 @@ class OrderService:
         if product_repository is None:
             product_repository = ProductRepository()
 
+        if payment_transaction_repository is None:
+            payment_transaction_repository = (
+                PaymentTransactionRepository()
+            )
+
         self.inventory_service = inventory_service
         self.sales_rule_engine = sales_rule_engine
         self.pricing_service = pricing_service
         self.order_state_machine = order_state_machine
         self.order_repository = order_repository
         self.product_repository = product_repository
+        self.payment_transaction_repository = (
+            payment_transaction_repository
+        )
 
     def create_order(
         self,
@@ -415,3 +443,88 @@ class OrderService:
         )
 
         return shipped_serial_numbers
+
+    def mark_as_paid(
+        self,
+        order: Order,
+        transaction_reference: str,
+        amount: Decimal,
+    ) -> PaymentTransaction:
+        if not isinstance(order, Order):
+            raise ValueError(
+                "Order must be an Order"
+            )
+
+        if not isinstance(transaction_reference, str):
+            raise ValueError(
+                "Payment reference must be a string"
+            )
+
+        if not transaction_reference.strip():
+            raise ValueError(
+                "Payment reference cannot be empty"
+            )
+
+        if not isinstance(amount, Decimal):
+            raise ValueError(
+                "Payment amount must be a Decimal"
+            )
+
+        if amount <= Decimal("0"):
+            raise ValueError(
+                "Payment amount must be positive"
+            )
+
+        if order.status == OrderStatus.PAID:
+            raise ValueError(
+                "Order is already paid"
+            )
+
+        if order.status not in {
+            OrderStatus.CREATED,
+            OrderStatus.RESERVED,
+        }:
+            raise ValueError(
+                "Order cannot be paid in its current state"
+            )
+
+        total_amount = order.get_total()
+
+        if amount != total_amount:
+            raise ValueError(
+                "Payment amount must match order total"
+            )
+
+        existing_transaction = (
+            self.payment_transaction_repository.get_by_order_id(
+                order.order_id
+            )
+        )
+
+        if existing_transaction:
+            raise ValueError(
+                "Order already has a payment transaction"
+            )
+
+        transaction_id = (
+            f"PAY-{order.order_id}-"
+            f"{transaction_reference}"
+        )
+
+        transaction = PaymentTransaction(
+            transaction_id=transaction_id,
+            order_id=order.order_id,
+            reference=transaction_reference,
+            amount=amount,
+        )
+
+        self.payment_transaction_repository.save(
+            transaction
+        )
+
+        self.order_state_machine.transition(
+            order,
+            OrderStatus.PAID,
+        )
+
+        return transaction
