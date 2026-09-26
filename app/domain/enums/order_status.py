@@ -5,4 +5,5 @@ class OrderStatus(Enum):
     RESERVED = "reserved"
     PAID = "paid"
     SHIPPED = "shipped"
-    COMPLETED = "completed"
+    DELIVERED = "delivered"
+    CANCELLED = "cancelled"
