@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from app.domain.enums.qc_result import QCResult
 from app.domain.enums.return_reason import ReturnReason
 from app.domain.enums.return_status import ReturnStatus
 from app.domain.models.order import Order
@@ -34,43 +35,29 @@ class ReturnRequest:
             raise ValueError("Status must be a ReturnStatus")
 
         if status != ReturnStatus.REQUESTED:
-            raise ValueError(
-                "Return request must start with REQUESTED"
-            )
+            raise ValueError("Return request must start with REQUESTED")
 
-        if requested_at is not None and not isinstance(
-            requested_at,
-            datetime,
-        ):
+        if requested_at is not None and not isinstance(requested_at, datetime):
             raise ValueError("Requested at must be a datetime")
 
         if not isinstance(items, list):
             raise ValueError("Items must be a list")
 
         if not items:
-            raise ValueError(
-                "Return request must contain at least one item"
-            )
+            raise ValueError("Return request must contain at least one item")
 
         for item in items:
             if not isinstance(item, ReturnItem):
-                raise ValueError(
-                    "All items must be ReturnItem instances"
-                )
+                raise ValueError("All items must be ReturnItem instances")
 
         if previous_returns is None:
             previous_returns = []
 
         if not isinstance(previous_returns, list):
-            raise ValueError(
-                "Previous returns must be a list"
-            )
+            raise ValueError("Previous returns must be a list")
 
         for previous_return in previous_returns:
-            if not isinstance(
-                previous_return,
-                ReturnRequest,
-            ):
+            if not isinstance(previous_return, ReturnRequest):
                 raise ValueError(
                     "All previous returns must be ReturnRequest instances"
                 )
@@ -81,9 +68,7 @@ class ReturnRequest:
                 )
 
             if previous_return.return_id == return_id:
-                raise ValueError(
-                    "Return ID must be unique"
-                )
+                raise ValueError("Return ID must be unique")
 
         order_quantities: dict[str, int] = {}
 
@@ -98,10 +83,7 @@ class ReturnRequest:
         for previous_return in previous_returns:
             for previous_item in previous_return.items:
                 previous_quantities[previous_item.sku] = (
-                    previous_quantities.get(
-                        previous_item.sku,
-                        0,
-                    )
+                    previous_quantities.get(previous_item.sku, 0)
                     + previous_item.quantity
                 )
 
@@ -141,11 +123,16 @@ class ReturnRequest:
             if requested_at is not None
             else datetime.now()
         )
+
         self.received_at_warehouse = None
         self.qc_inspection_at = None
         self.approved_at = None
         self.rejected_at = None
         self.refunded_at = None
+
+        self.qc_result: QCResult | None = None
+        self.qc_note: str | None = None
+        self.qc_at: datetime | None = None
 
     @property
     def status(self) -> ReturnStatus:
@@ -157,14 +144,10 @@ class ReturnRequest:
         timestamp: datetime,
     ) -> None:
         if not isinstance(status, ReturnStatus):
-            raise ValueError(
-                "Status must be a ReturnStatus"
-            )
+            raise ValueError("Status must be a ReturnStatus")
 
         if not isinstance(timestamp, datetime):
-            raise ValueError(
-                "Timestamp must be a datetime"
-            )
+            raise ValueError("Timestamp must be a datetime")
 
         self._status = status
 
@@ -182,3 +165,31 @@ class ReturnRequest:
 
         elif status == ReturnStatus.REFUNDED:
             self.refunded_at = timestamp
+
+    def set_qc_result(
+        self,
+        result: QCResult,
+        note: str | None,
+        timestamp: datetime,
+    ) -> None:
+        if not isinstance(result, QCResult):
+            raise ValueError("QC result must be a QCResult")
+
+        if note is not None:
+            if not isinstance(note, str):
+                raise ValueError("QC note must be a string")
+
+            if not note.strip():
+                raise ValueError("QC note cannot be empty")
+
+        if not isinstance(timestamp, datetime):
+            raise ValueError("QC timestamp must be a datetime")
+
+        if self.status != ReturnStatus.QC_INSPECTION:
+            raise ValueError(
+                "QC result can only be recorded during QC inspection"
+            )
+
+        self.qc_result = result
+        self.qc_note = note
+        self.qc_at = timestamp
