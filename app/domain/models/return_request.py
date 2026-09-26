@@ -33,27 +33,44 @@ class ReturnRequest:
         if not isinstance(status, ReturnStatus):
             raise ValueError("Status must be a ReturnStatus")
 
-        if requested_at is not None and not isinstance(requested_at, datetime):
+        if status != ReturnStatus.REQUESTED:
+            raise ValueError(
+                "Return request must start with REQUESTED"
+            )
+
+        if requested_at is not None and not isinstance(
+            requested_at,
+            datetime,
+        ):
             raise ValueError("Requested at must be a datetime")
 
         if not isinstance(items, list):
             raise ValueError("Items must be a list")
 
         if not items:
-            raise ValueError("Return request must contain at least one item")
+            raise ValueError(
+                "Return request must contain at least one item"
+            )
 
         for item in items:
             if not isinstance(item, ReturnItem):
-                raise ValueError("All items must be ReturnItem instances")
+                raise ValueError(
+                    "All items must be ReturnItem instances"
+                )
 
         if previous_returns is None:
             previous_returns = []
 
         if not isinstance(previous_returns, list):
-            raise ValueError("Previous returns must be a list")
+            raise ValueError(
+                "Previous returns must be a list"
+            )
 
         for previous_return in previous_returns:
-            if not isinstance(previous_return, ReturnRequest):
+            if not isinstance(
+                previous_return,
+                ReturnRequest,
+            ):
                 raise ValueError(
                     "All previous returns must be ReturnRequest instances"
                 )
@@ -64,7 +81,9 @@ class ReturnRequest:
                 )
 
             if previous_return.return_id == return_id:
-                raise ValueError("Return ID must be unique")
+                raise ValueError(
+                    "Return ID must be unique"
+                )
 
         order_quantities: dict[str, int] = {}
 
@@ -79,7 +98,10 @@ class ReturnRequest:
         for previous_return in previous_returns:
             for previous_item in previous_return.items:
                 previous_quantities[previous_item.sku] = (
-                    previous_quantities.get(previous_item.sku, 0)
+                    previous_quantities.get(
+                        previous_item.sku,
+                        0,
+                    )
                     + previous_item.quantity
                 )
 
@@ -111,7 +133,7 @@ class ReturnRequest:
 
         self.return_id = return_id
         self.order_id = order.order_id
-        self.status = status
+        self._status = ReturnStatus.REQUESTED
         self.reason = reason
         self.items = items
         self.requested_at = (
@@ -119,3 +141,44 @@ class ReturnRequest:
             if requested_at is not None
             else datetime.now()
         )
+        self.received_at_warehouse = None
+        self.qc_inspection_at = None
+        self.approved_at = None
+        self.rejected_at = None
+        self.refunded_at = None
+
+    @property
+    def status(self) -> ReturnStatus:
+        return self._status
+
+    def _set_status(
+        self,
+        status: ReturnStatus,
+        timestamp: datetime,
+    ) -> None:
+        if not isinstance(status, ReturnStatus):
+            raise ValueError(
+                "Status must be a ReturnStatus"
+            )
+
+        if not isinstance(timestamp, datetime):
+            raise ValueError(
+                "Timestamp must be a datetime"
+            )
+
+        self._status = status
+
+        if status == ReturnStatus.RECEIVED_AT_WAREHOUSE:
+            self.received_at_warehouse = timestamp
+
+        elif status == ReturnStatus.QC_INSPECTION:
+            self.qc_inspection_at = timestamp
+
+        elif status == ReturnStatus.APPROVED:
+            self.approved_at = timestamp
+
+        elif status == ReturnStatus.REJECTED:
+            self.rejected_at = timestamp
+
+        elif status == ReturnStatus.REFUNDED:
+            self.refunded_at = timestamp
