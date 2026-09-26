@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 from app.domain.models.base_product import BaseProduct
 from app.domain.models.serialized_product import SerializedProduct
@@ -13,6 +14,7 @@ class Batch:
         entry_date: date,
         expiry_date: date | None = None,
         serial_numbers: list[str] | None = None,
+        unit_cost: Decimal | None = None,
     ):
         if not isinstance(batch_id, str):
             raise ValueError("Batch ID must be a string")
@@ -38,6 +40,13 @@ class Batch:
         if product.expiry_tracking and expiry_date is None:
             raise ValueError("Expiry date is required for perishable products")
 
+        if unit_cost is not None:
+            if not isinstance(unit_cost, Decimal):
+                raise ValueError("Unit cost must be a Decimal")
+
+            if unit_cost < Decimal("0"):
+                raise ValueError("Unit cost cannot be negative")
+
         if serial_numbers is not None:
             if not isinstance(serial_numbers, list):
                 raise ValueError("Serial numbers must be a list")
@@ -54,10 +63,14 @@ class Batch:
 
         if isinstance(product, SerializedProduct):
             if serial_numbers is None:
-                raise ValueError("Serial numbers are required for serialized products")
+                raise ValueError(
+                    "Serial numbers are required for serialized products"
+                )
 
             if len(serial_numbers) != quantity:
-                raise ValueError("Number of serial numbers must match quantity")
+                raise ValueError(
+                    "Number of serial numbers must match quantity"
+                )
 
         self.batch_id = batch_id
         self.product = product
@@ -65,6 +78,7 @@ class Batch:
         self.entry_date = entry_date
         self.expiry_date = expiry_date
         self.serial_numbers = serial_numbers
+        self.unit_cost = unit_cost
 
     def is_expired(self, reference_date: date | None = None) -> bool:
         if self.expiry_date is None:

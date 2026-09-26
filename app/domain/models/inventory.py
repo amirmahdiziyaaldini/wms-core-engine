@@ -1,3 +1,4 @@
+from app.domain.enums.warehouse_type import WarehouseType
 from app.domain.models.batch import Batch
 from app.domain.models.reservation import Reservation
 from app.domain.models.warehouse import Warehouse
@@ -52,6 +53,12 @@ class Inventory:
         return total
 
     def get_available_stock(self, sku: str) -> int:
+        if (
+            self.warehouse.warehouse_type
+            == WarehouseType.SCRAP_QUARANTINE
+        ):
+            return 0
+
         physical_stock = self.get_physical_stock(sku)
         reserved_stock = self.get_reserved_stock(sku)
 
