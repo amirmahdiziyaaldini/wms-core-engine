@@ -397,6 +397,53 @@ class OrderService:
                 reservation_id
             )
 
+    def cancel_order(
+        self,
+        order: Order,
+        inventory: Inventory,
+    ) -> None:
+        if not isinstance(order, Order):
+            raise ValueError(
+                "Order must be an Order"
+            )
+
+        if not isinstance(inventory, Inventory):
+            raise ValueError(
+                "Inventory must be an Inventory"
+            )
+
+        if order.status in {
+            OrderStatus.SHIPPED,
+            OrderStatus.DELIVERED,
+        }:
+            raise ValueError(
+                "Shipped or delivered orders cannot be cancelled; use RMA"
+            )
+
+        if order.status == OrderStatus.CANCELLED:
+            raise ValueError(
+                "Order is already cancelled"
+            )
+
+        if order.status not in {
+            OrderStatus.CREATED,
+            OrderStatus.RESERVED,
+            OrderStatus.PAID,
+        }:
+            raise ValueError(
+                "Order cannot be cancelled in its current state"
+            )
+
+        self.release_order_reservations(
+            order=order,
+            inventory=inventory,
+        )
+
+        self.order_state_machine.transition(
+            order,
+            OrderStatus.CANCELLED,
+        )
+
     def ship_order(
         self,
         order: Order,
