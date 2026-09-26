@@ -5,7 +5,6 @@ from app.domain.models.order import Order
 
 
 class OrderStateMachine:
-
     _TRANSITIONS = {
         OrderStatus.CREATED: {
             OrderStatus.PAID,
@@ -33,58 +32,56 @@ class OrderStateMachine:
         current_status: OrderStatus,
         target_status: OrderStatus,
     ) -> bool:
-        if not isinstance(
-            current_status,
-            OrderStatus,
-        ):
+        if not isinstance(current_status, OrderStatus):
             raise ValueError(
                 "Current status must be an OrderStatus"
             )
 
-        if not isinstance(
-            target_status,
-            OrderStatus,
-        ):
+        if not isinstance(target_status, OrderStatus):
             raise ValueError(
                 "Target status must be an OrderStatus"
             )
 
-        return target_status in self._TRANSITIONS.get(
+        allowed_statuses = self._TRANSITIONS.get(
             current_status,
             set(),
         )
+
+        return target_status in allowed_statuses
 
     def transition(
         self,
         order: Order,
         target_status: OrderStatus,
+        timestamp: datetime | None = None,
     ) -> None:
         if not isinstance(order, Order):
             raise ValueError(
-                "Order must be an Order instance"
+                "Order must be an Order"
             )
 
-        if not isinstance(
-            target_status,
-            OrderStatus,
-        ):
+        if not isinstance(target_status, OrderStatus):
             raise ValueError(
                 "Target status must be an OrderStatus"
             )
 
-        current_status = order.status
-
         if not self.can_transition(
-            current_status,
+            order.status,
             target_status,
         ):
             raise ValueError(
                 f"Invalid order transition: "
-                f"{current_status.value} -> "
+                f"{order.status.value} -> "
                 f"{target_status.value}"
             )
 
-        timestamp = datetime.now()
+        if timestamp is None:
+            timestamp = datetime.now()
+
+        if not isinstance(timestamp, datetime):
+            raise ValueError(
+                "Timestamp must be a datetime"
+            )
 
         order._set_status(
             target_status,

@@ -6,7 +6,6 @@ from app.domain.models.order_item import OrderItem
 
 
 class Order:
-
     def __init__(
         self,
         order_id: str,
@@ -49,7 +48,6 @@ class Order:
         self.order_id = order_id
         self.customer_id = customer_id
         self._status = status
-
         self.created_at = (
             created_at
             if created_at is not None
@@ -59,9 +57,9 @@ class Order:
         self.reserved_at: datetime | None = None
         self.paid_at: datetime | None = None
         self.shipped_at: datetime | None = None
+        self.delivered_at: datetime | None = None
         self.completed_at: datetime | None = None
         self.cancelled_at: datetime | None = None
-
         self.items: list[OrderItem] = []
 
     @property
@@ -85,15 +83,15 @@ class Order:
 
         self._status = status
 
-        if status == OrderStatus.PAID:
+        if status == OrderStatus.RESERVED:
+            self.reserved_at = timestamp
+        elif status == OrderStatus.PAID:
             self.paid_at = timestamp
-
         elif status == OrderStatus.SHIPPED:
             self.shipped_at = timestamp
-
         elif status == OrderStatus.DELIVERED:
+            self.delivered_at = timestamp
             self.completed_at = timestamp
-
         elif status == OrderStatus.CANCELLED:
             self.cancelled_at = timestamp
 

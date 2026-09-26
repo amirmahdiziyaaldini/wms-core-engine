@@ -8,19 +8,20 @@ from app.domain.models.order import Order
 from app.domain.models.payment_transaction import PaymentTransaction
 from app.domain.models.reservation import Reservation
 from app.domain.models.sales_rule_context import SalesRuleContext
+from app.domain.models.shipment import Shipment
 from app.domain.states.order_state_machine import OrderStateMachine
 from app.repositories.order_repository import OrderRepository
 from app.repositories.payment_transaction_repository import (
     PaymentTransactionRepository,
 )
 from app.repositories.product_repository import ProductRepository
+from app.repositories.shipment_repository import ShipmentRepository
 from app.services.inventory_service import InventoryService
 from app.services.pricing_service import PricingService
 from app.services.sales_rule_engine import SalesRuleEngine
 
 
 class OrderService:
-
     def __init__(
         self,
         inventory_service: InventoryService | None = None,
@@ -32,6 +33,7 @@ class OrderService:
         payment_transaction_repository: (
             PaymentTransactionRepository | None
         ) = None,
+        shipment_repository: ShipmentRepository | None = None,
     ):
         if inventory_service is not None and not isinstance(
             inventory_service,
@@ -93,6 +95,14 @@ class OrderService:
                 "PaymentTransactionRepository"
             )
 
+        if shipment_repository is not None and not isinstance(
+            shipment_repository,
+            ShipmentRepository,
+        ):
+            raise ValueError(
+                "Shipment repository must be a ShipmentRepository"
+            )
+
         if inventory_service is None:
             inventory_service = InventoryService(
                 InventoryLedger()
@@ -118,6 +128,9 @@ class OrderService:
                 PaymentTransactionRepository()
             )
 
+        if shipment_repository is None:
+            shipment_repository = ShipmentRepository()
+
         self.inventory_service = inventory_service
         self.sales_rule_engine = sales_rule_engine
         self.pricing_service = pricing_service
@@ -127,6 +140,7 @@ class OrderService:
         self.payment_transaction_repository = (
             payment_transaction_repository
         )
+        self.shipment_repository = shipment_repository
 
     def create_order(
         self,
@@ -388,7 +402,7 @@ class OrderService:
         order: Order,
         inventory: Inventory,
         timestamp: datetime,
-    ) -> list[str]:
+    ) -> Shipment:
         if not isinstance(order, Order):
             raise ValueError(
                 "Order must be an Order"
@@ -404,22 +418,46 @@ class OrderService:
                 "Timestamp must be a datetime"
             )
 
+        existing_shipments = (
+            self.shipment_repository.get_by_order_id(
+                order.order_id
+            )
+        )
+
+        if existing_shipments:
+            raise ValueError(
+                "Order has already been shipped"
+            )
+
         if order.status != OrderStatus.PAID:
             raise ValueError(
                 "Only paid orders can be shipped"
             )
 
-        order_reservations = []
-
-        for reservation in inventory.reservations.values():
-            if reservation.order_id == order.order_id:
-                order_reservations.append(
-                    reservation
-                )
+        order_reservations = [
+            reservation
+            for reservation in inventory.reservations.values()
+            if reservation.order_id == order.order_id
+        ]
 
         if not order_reservations:
             raise ValueError(
                 "Order has no active reservations"
+            )
+
+        order_item_ids = {
+            item.item_id
+            for item in order.items
+        }
+
+        reservation_item_ids = {
+            reservation.order_item_id
+            for reservation in order_reservations
+        }
+
+        if order_item_ids != reservation_item_ids:
+            raise ValueError(
+                "Order reservations are incomplete"
             )
 
         shipped_serial_numbers = []
@@ -440,9 +478,71 @@ class OrderService:
         self.order_state_machine.transition(
             order,
             OrderStatus.SHIPPED,
+            timestamp=timestamp,
         )
 
-        return shipped_serial_numbers
+        shipment_id = (
+            f"SHP-{order.order_id}"
+        )
+
+        shipment = Shipment(
+            shipment_id=shipment_id,
+            order_id=order.order_id,
+            warehouse_id=inventory.warehouse.warehouse_id,
+            shipped_at=order.shipped_at,
+            serial_numbers=shipped_serial_numbers,
+        )
+
+        self.shipment_repository.save(
+            shipment
+        )
+
+        return shipment
+
+    def deliver_order(
+        self,
+        order: Order,
+        timestamp: datetime,
+    ) -> Shipment:
+        if not isinstance(order, Order):
+            raise ValueError(
+                "Order must be an Order"
+            )
+
+        if not isinstance(timestamp, datetime):
+            raise ValueError(
+                "Timestamp must be a datetime"
+            )
+
+        if order.status != OrderStatus.SHIPPED:
+            raise ValueError(
+                "Only shipped orders can be delivered"
+            )
+
+        shipments = (
+            self.shipment_repository.get_by_order_id(
+                order.order_id
+            )
+        )
+
+        if not shipments:
+            raise ValueError(
+                "Shipment not found"
+            )
+
+        shipment = shipments[-1]
+
+        self.order_state_machine.transition(
+            order,
+            OrderStatus.DELIVERED,
+            timestamp=timestamp,
+        )
+
+        shipment.mark_as_delivered(
+            order.delivered_at
+        )
+
+        return shipment
 
     def mark_as_paid(
         self,
@@ -528,3 +628,19 @@ class OrderService:
         )
 
         return transaction
+
+    def get_order_shipments(
+        self,
+        order_id: str,
+    ) -> list[Shipment]:
+        return self.shipment_repository.get_by_order_id(
+            order_id
+        )
+
+    def get_serial_shipment_history(
+        self,
+        serial_number: str,
+    ) -> list[Shipment]:
+        return self.shipment_repository.get_by_serial_number(
+            serial_number
+        )
