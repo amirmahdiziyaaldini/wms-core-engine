@@ -653,6 +653,17 @@ class OrderService:
                 "Order already has a payment transaction"
             )
 
+        existing_reference = (
+            self.payment_transaction_repository.get_by_reference(
+                transaction_reference
+            )
+        )
+
+        if existing_reference:
+            raise ValueError(
+                "Payment reference already exists"
+            )
+
         transaction_id = (
             f"PAY-{order.order_id}-"
             f"{transaction_reference}"

@@ -187,7 +187,7 @@ def test_financial_transaction_repository_rejects_duplicate_transaction_id():
         repository.save(transaction_2)
 
 
-def test_financial_transaction_repository_rejects_duplicate_return():
+def test_financial_transaction_repository_stores_duplicate_return():
     repository = FinancialTransactionRepository()
 
     transaction_1 = FinancialTransaction(
@@ -207,9 +207,10 @@ def test_financial_transaction_repository_rejects_duplicate_return():
     )
 
     repository.save(transaction_1)
+    repository.save(transaction_2)
 
-    with pytest.raises(ValueError):
-        repository.save(transaction_2)
+    assert repository.get("REF-001") is transaction_1
+    assert repository.get("REF-002") is transaction_2
 
 
 def test_financial_transaction_repository_list_all():

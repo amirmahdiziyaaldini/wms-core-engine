@@ -29,15 +29,6 @@ class FinancialTransactionRepository:
                 f"{transaction.transaction_id}"
             )
 
-        for existing_transaction in self._transactions.values():
-            if (
-                existing_transaction.return_id
-                == transaction.return_id
-            ):
-                raise ValueError(
-                    "Refund already exists for this return"
-                )
-
         self._transactions[
             transaction.transaction_id
         ] = transaction
