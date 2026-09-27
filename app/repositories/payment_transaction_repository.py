@@ -27,15 +27,6 @@ class PaymentTransactionRepository:
                 f"{transaction.transaction_id}"
             )
 
-        for existing_transaction in self._transactions.values():
-            if (
-                existing_transaction.reference
-                == transaction.reference
-            ):
-                raise ValueError(
-                    "Payment reference already exists"
-                )
-
         self._transactions[
             transaction.transaction_id
         ] = transaction
