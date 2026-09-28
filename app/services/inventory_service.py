@@ -4,9 +4,11 @@ from app.domain.enums.inventory_transaction_type import (
     InventoryTransactionType,
 )
 from app.domain.enums.warehouse_type import WarehouseType
+from app.domain.models.batch import Batch
 from app.domain.models.inventory import Inventory
 from app.domain.models.inventory_ledger import InventoryLedger
 from app.domain.models.inventory_transaction import InventoryTransaction
+from app.domain.models.reservation import Reservation
 from app.domain.models.warehouse import Warehouse
 from app.strategies.fifo_stock_allocation_strategy import (
     FIFOStockAllocationStrategy,
@@ -64,6 +66,49 @@ class InventoryService:
 
         return transaction
 
+    def receive(
+        self,
+        inventory: Inventory,
+        batch: Batch,
+        reference_id: str | None = None,
+        timestamp: datetime | None = None,
+    ) -> Batch:
+        if not isinstance(inventory, Inventory):
+            raise ValueError("Inventory must be an Inventory")
+
+        if not isinstance(batch, Batch):
+            raise ValueError("Batch must be a Batch")
+
+        if timestamp is None:
+            timestamp = datetime.now()
+
+        if not isinstance(timestamp, datetime):
+            raise ValueError("Timestamp must be a datetime")
+
+        if reference_id is None:
+            reference_id = f"RECEIVE-{batch.batch_id}"
+
+        if not isinstance(reference_id, str):
+            raise ValueError("Reference ID must be a string")
+
+        if not reference_id.strip():
+            raise ValueError("Reference ID cannot be empty")
+
+        inventory.add_batch(batch)
+
+        self.record_transaction(
+            timestamp=timestamp,
+            warehouse=inventory.warehouse,
+            sku=batch.product.sku,
+            quantity=batch.remaining_quantity,
+            transaction_type=InventoryTransactionType.RECEIVE,
+            reference_id=reference_id,
+            batch_id=batch.batch_id,
+            serial_numbers=batch.serial_numbers,
+        )
+
+        return batch
+
     def allocate_stock(
         self,
         inventory: Inventory,
@@ -110,6 +155,84 @@ class InventoryService:
             quantity=quantity,
             reference_date=reference_date,
         )
+
+    def reserve_reservation(
+        self,
+        inventory: Inventory,
+        reservation: Reservation,
+        timestamp: datetime | None = None,
+        reference_id: str | None = None,
+    ) -> Reservation:
+        if not isinstance(inventory, Inventory):
+            raise ValueError("Inventory must be an Inventory")
+
+        if not isinstance(reservation, Reservation):
+            raise ValueError("Reservation must be a Reservation")
+
+        if timestamp is None:
+            timestamp = datetime.now()
+
+        if not isinstance(timestamp, datetime):
+            raise ValueError("Timestamp must be a datetime")
+
+        inventory.reserve_reservation(reservation)
+
+        self.record_transaction(
+            timestamp=timestamp,
+            warehouse=inventory.warehouse,
+            sku=reservation.sku,
+            quantity=reservation.quantity,
+            transaction_type=InventoryTransactionType.RESERVE,
+            reference_id=reference_id or reservation.order_id,
+        )
+
+        return reservation
+
+    def release_reservation(
+        self,
+        inventory: Inventory,
+        reservation_id: str,
+        timestamp: datetime | None = None,
+        reference_id: str | None = None,
+    ) -> Reservation:
+        if not isinstance(inventory, Inventory):
+            raise ValueError("Inventory must be an Inventory")
+
+        if not isinstance(reservation_id, str):
+            raise ValueError("Reservation ID must be a string")
+
+        if not reservation_id.strip():
+            raise ValueError("Reservation ID cannot be empty")
+
+        if timestamp is None:
+            timestamp = datetime.now()
+
+        if not isinstance(timestamp, datetime):
+            raise ValueError("Timestamp must be a datetime")
+
+        reservation = inventory.reservations.get(
+            reservation_id
+        )
+
+        if reservation is None:
+            raise ValueError("Reservation not found")
+
+        released = inventory.release_reservation(
+            reservation_id
+        )
+
+        self.record_transaction(
+            timestamp=timestamp,
+            warehouse=inventory.warehouse,
+            sku=released.sku,
+            quantity=-released.quantity,
+            transaction_type=(
+                InventoryTransactionType.RELEASE_RESERVATION
+            ),
+            reference_id=reference_id or released.order_id,
+        )
+
+        return released
 
     def consume_reservation(
         self,
@@ -321,7 +444,11 @@ class InventoryService:
 
         physical = inventory.get_physical_stock(sku)
         reserved = inventory.get_reserved_stock(sku)
-        available = inventory.get_available_stock(sku)
+
+        available = inventory.get_available_stock(
+            sku,
+            reference_date,
+        )
 
         expired = 0
 

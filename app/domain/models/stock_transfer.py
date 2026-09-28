@@ -10,6 +10,7 @@ class StockTransferItem:
         sku: str,
         quantity: int,
         batch_allocations: dict[str, int] | None = None,
+        serial_allocations: dict[str, list[str]] | None = None,
     ):
         if not isinstance(sku, str) or not sku.strip():
             raise ValueError("SKU cannot be empty")
@@ -35,11 +36,51 @@ class StockTransferItem:
                     raise ValueError("Invalid batch allocation")
 
             if sum(batch_allocations.values()) != quantity:
-                raise ValueError("Batch allocations must equal item quantity")
+                raise ValueError(
+                    "Batch allocations must equal item quantity"
+                )
+
+        if serial_allocations is not None:
+            if not isinstance(serial_allocations, dict):
+                raise ValueError(
+                    "Serial allocations must be a dictionary"
+                )
+
+            for batch_id, serial_numbers in serial_allocations.items():
+                if not isinstance(batch_id, str) or not batch_id.strip():
+                    raise ValueError(
+                        "Invalid serial allocation batch ID"
+                    )
+
+                if not isinstance(serial_numbers, list):
+                    raise ValueError(
+                        "Serial allocation must contain a list"
+                    )
+
+                for serial_number in serial_numbers:
+                    if (
+                        not isinstance(serial_number, str)
+                        or not serial_number.strip()
+                    ):
+                        raise ValueError("Invalid serial number")
+
+            if sum(
+                len(values)
+                for values in serial_allocations.values()
+            ) > quantity:
+                raise ValueError(
+                    "Serial allocations cannot exceed item quantity"
+                )
 
         self.sku = sku.strip()
         self.quantity = quantity
         self.batch_allocations = batch_allocations or {}
+        self.serial_allocations = {
+            batch_id: list(serial_numbers)
+            for batch_id, serial_numbers in (
+                serial_allocations or {}
+            ).items()
+        }
 
 
 class StockTransfer:
@@ -64,28 +105,51 @@ class StockTransfer:
             raise ValueError("Destination must be a Warehouse")
 
         if source.warehouse_id == destination.warehouse_id:
-            raise ValueError("Source and destination warehouses must be different")
+            raise ValueError(
+                "Source and destination warehouses must be different"
+            )
 
         if not isinstance(items, list) or not items:
-            raise ValueError("Transfer must contain at least one item")
+            raise ValueError(
+                "Transfer must contain at least one item"
+            )
 
-        if any(not isinstance(item, StockTransferItem) for item in items):
-            raise ValueError("All transfer items must be StockTransferItem")
+        if any(
+            not isinstance(item, StockTransferItem)
+            for item in items
+        ):
+            raise ValueError(
+                "All transfer items must be StockTransferItem"
+            )
 
         if not isinstance(created_at, datetime):
-            raise ValueError("Created at must be a datetime")
+            raise ValueError(
+                "Created at must be a datetime"
+            )
 
-        if dispatched_at is not None and not isinstance(dispatched_at, datetime):
-            raise ValueError("Dispatched at must be a datetime")
+        if dispatched_at is not None and not isinstance(
+            dispatched_at,
+            datetime,
+        ):
+            raise ValueError(
+                "Dispatched at must be a datetime"
+            )
 
-        if received_at is not None and not isinstance(received_at, datetime):
-            raise ValueError("Received at must be a datetime")
+        if received_at is not None and not isinstance(
+            received_at,
+            datetime,
+        ):
+            raise ValueError(
+                "Received at must be a datetime"
+            )
 
         if status is None:
             status = TransferStatus.CREATED
 
         if not isinstance(status, TransferStatus):
-            raise ValueError("Invalid transfer status")
+            raise ValueError(
+                "Invalid transfer status"
+            )
 
         self.transfer_id = transfer_id.strip()
         self.source = source
