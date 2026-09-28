@@ -95,6 +95,25 @@ def test_variant_parent_product_must_be_base_product():
         )
 
 
+def test_variant_price_get_with_positive_modifier():
+    parent_product = create_parent_product()
+
+    variant = VariantProduct(
+        sku="TSHIRT-RED-XL",
+        name="T-Shirt Red XL",
+        barcode="987654321",
+        category="Clothing",
+        attributes={
+            "color": "Red",
+            "size": "XL",
+        },
+        price_modifier=Decimal("150000"),
+        parent_product=parent_product,
+    )
+
+    assert variant.price_get() == Decimal("1150000")
+
+
 def test_variant_get_price_with_positive_modifier():
     parent_product = create_parent_product()
 

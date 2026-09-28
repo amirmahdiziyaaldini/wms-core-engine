@@ -31,6 +31,18 @@ def test_expiry_tracking_is_enabled():
     assert product.expiry_tracking is True
 
 
+def test_perishable_product_price_get():
+    product = PerishableProduct(
+        sku="MILK-001",
+        name="Fresh Milk",
+        barcode="123456789",
+        category="Food",
+        base_price=Decimal("50000"),
+    )
+
+    assert product.price_get() == Decimal("50000")
+
+
 def test_perishable_product_get_price():
     product = PerishableProduct(
         sku="MILK-001",

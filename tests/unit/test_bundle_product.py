@@ -87,6 +87,20 @@ def test_bundle_price_is_independent_from_component_prices():
     assert bundle.get_price() == Decimal("900000")
 
 
+def test_bundle_price_get_returns_bundle_price():
+    book = create_book()
+    flash_drive = create_flash_drive()
+
+    bundle = create_bundle(
+        [
+            BundleComponent(book, 1),
+            BundleComponent(flash_drive, 2),
+        ]
+    )
+
+    assert bundle.price_get() == Decimal("900000")
+
+
 def test_get_sellable_quantity():
     book = create_book()
     flash_drive = create_flash_drive()

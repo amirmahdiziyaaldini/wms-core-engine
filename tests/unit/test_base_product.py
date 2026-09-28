@@ -98,6 +98,18 @@ def test_zero_base_price():
     assert product.base_price == Decimal("0")
 
 
+def test_price_get():
+    product = BaseProduct(
+        sku="BOOK-001",
+        name="Python Fundamentals",
+        barcode="123456789",
+        category="Books",
+        base_price=Decimal("500000"),
+    )
+
+    assert product.price_get() == Decimal("500000")
+
+
 def test_get_price():
     product = BaseProduct(
         sku="BOOK-001",

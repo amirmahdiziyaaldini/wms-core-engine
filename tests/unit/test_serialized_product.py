@@ -31,6 +31,18 @@ def test_serial_tracking_is_enabled():
     assert product.serial_tracking is True
 
 
+def test_serialized_product_price_get():
+    product = SerializedProduct(
+        sku="LAPTOP-001",
+        name="Business Laptop",
+        barcode="123456789",
+        category="Electronics",
+        base_price=Decimal("50000000"),
+    )
+
+    assert product.price_get() == Decimal("50000000")
+
+
 def test_serialized_product_inherits_from_base_product():
     product = SerializedProduct(
         sku="LAPTOP-001",
