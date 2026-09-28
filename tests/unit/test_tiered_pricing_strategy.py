@@ -248,3 +248,99 @@ def test_discount_above_one_is_rejected():
                 ),
             ]
         )
+
+
+def test_min_quantity_must_be_integer():
+    with pytest.raises(
+        ValueError,
+        match="Tier minimum quantity must be an integer",
+    ):
+        TieredPricingStrategy(
+            tiers=[
+                PriceTier(
+                    min_quantity=1.5,
+                    max_quantity=5,
+                    discount_rate=Decimal("0"),
+                ),
+            ]
+        )
+
+
+def test_min_quantity_cannot_be_boolean():
+    with pytest.raises(
+        ValueError,
+        match="Tier minimum quantity must be an integer",
+    ):
+        TieredPricingStrategy(
+            tiers=[
+                PriceTier(
+                    min_quantity=True,
+                    max_quantity=5,
+                    discount_rate=Decimal("0"),
+                ),
+            ]
+        )
+
+
+def test_min_quantity_must_be_positive():
+    with pytest.raises(
+        ValueError,
+        match="Tier minimum quantity must be positive",
+    ):
+        TieredPricingStrategy(
+            tiers=[
+                PriceTier(
+                    min_quantity=0,
+                    max_quantity=5,
+                    discount_rate=Decimal("0"),
+                ),
+            ]
+        )
+
+
+def test_max_quantity_must_be_integer():
+    with pytest.raises(
+        ValueError,
+        match="Tier maximum quantity must be an integer",
+    ):
+        TieredPricingStrategy(
+            tiers=[
+                PriceTier(
+                    min_quantity=1,
+                    max_quantity=5.5,
+                    discount_rate=Decimal("0"),
+                ),
+            ]
+        )
+
+
+def test_max_quantity_cannot_be_boolean():
+    with pytest.raises(
+        ValueError,
+        match="Tier maximum quantity must be an integer",
+    ):
+        TieredPricingStrategy(
+            tiers=[
+                PriceTier(
+                    min_quantity=1,
+                    max_quantity=True,
+                    discount_rate=Decimal("0"),
+                ),
+            ]
+        )
+
+
+def test_max_quantity_cannot_be_lower_than_min_quantity():
+    with pytest.raises(
+        ValueError,
+        match="Tier maximum quantity cannot be lower than minimum quantity",
+    ):
+        TieredPricingStrategy(
+            tiers=[
+                PriceTier(
+                    min_quantity=10,
+                    max_quantity=5,
+                    discount_rate=Decimal("0"),
+                ),
+            ]
+        )

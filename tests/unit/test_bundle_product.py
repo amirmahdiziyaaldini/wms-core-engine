@@ -54,6 +54,13 @@ def test_create_bundle_product():
     assert len(bundle.components) == 2
 
 
+def test_bundle_components_must_be_list():
+    book = create_book()
+
+    with pytest.raises(ValueError):
+        create_bundle(book)
+
+
 def test_bundle_must_have_at_least_one_component():
     with pytest.raises(ValueError):
         create_bundle([])
