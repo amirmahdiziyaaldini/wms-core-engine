@@ -2,9 +2,11 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from app.domain.enums.order_status import OrderStatus
+from app.domain.models.bundle_product import BundleProduct
 from app.domain.models.inventory import Inventory
 from app.domain.models.inventory_ledger import InventoryLedger
 from app.domain.models.order import Order
+from app.domain.models.order_item import OrderItem
 from app.domain.models.payment_transaction import PaymentTransaction
 from app.domain.models.reservation import Reservation
 from app.domain.models.sales_rule_context import SalesRuleContext
@@ -301,28 +303,46 @@ class OrderService:
                         "Order item is already reserved"
                     )
 
-        for item in order.items:
+        reservation_plan = self._build_reservation_plan(
+            order=order,
+            catalog=catalog,
+        )
+
+        for item, sku, quantity in reservation_plan:
             available_stock = inventory.get_available_stock(
-                item.sku
+                sku
             )
 
-            if item.quantity > available_stock:
+            if quantity > available_stock:
                 raise ValueError(
-                    f"Insufficient available stock for SKU {item.sku}"
+                    f"Insufficient available stock for SKU {sku}"
                 )
 
         reservations = []
 
-        for item in order.items:
-            reservation_id = (
-                f"RES-{order.order_id}-{item.item_id}"
+        plan_counts: dict[str, int] = {}
+
+        for item, _, _ in reservation_plan:
+            plan_counts[item.item_id] = (
+                plan_counts.get(item.item_id, 0) + 1
             )
+
+        for item, sku, quantity in reservation_plan:
+            if plan_counts[item.item_id] == 1:
+                reservation_id = (
+                    f"RES-{order.order_id}-{item.item_id}"
+                )
+            else:
+                reservation_id = (
+                    f"RES-{order.order_id}-"
+                    f"{item.item_id}-{sku}"
+                )
 
             batch_allocations = (
                 self.inventory_service.allocate_stock(
                     inventory=inventory,
-                    sku=item.sku,
-                    quantity=item.quantity,
+                    sku=sku,
+                    quantity=quantity,
                     reference_date=reference_date,
                 )
             )
@@ -331,8 +351,8 @@ class OrderService:
                 reservation_id=reservation_id,
                 order_id=order.order_id,
                 order_item_id=item.item_id,
-                sku=item.sku,
-                quantity=item.quantity,
+                sku=sku,
+                quantity=quantity,
                 batch_allocations=batch_allocations,
             )
 
@@ -366,6 +386,84 @@ class OrderService:
         )
 
         return reservations
+
+    def _build_reservation_plan(
+        self,
+        order: Order,
+        catalog=None,
+    ) -> list[tuple[OrderItem, str, int]]:
+        plan: list[
+            tuple[OrderItem, str, int]
+        ] = []
+
+        for item in order.items:
+            product = None
+
+            if catalog is not None:
+                product = catalog.get(item.sku)
+
+            if product is None:
+                product = self.product_repository.get(
+                    item.sku
+                )
+
+            if isinstance(product, BundleProduct):
+                components = self._expand_bundle_components(
+                    product=product,
+                    bundle_quantity=item.quantity,
+                )
+
+                for sku, quantity in components:
+                    plan.append(
+                        (
+                            item,
+                            sku,
+                            quantity,
+                        )
+                    )
+            else:
+                plan.append(
+                    (
+                        item,
+                        item.sku,
+                        item.quantity,
+                    )
+                )
+
+        return plan
+
+    def _expand_bundle_components(
+        self,
+        product: BundleProduct,
+        bundle_quantity: int,
+    ) -> list[tuple[str, int]]:
+        expanded: list[tuple[str, int]] = []
+
+        for component in product.components:
+            required_quantity = (
+                bundle_quantity
+                * component.required_quantity
+            )
+
+            if isinstance(
+                component.product,
+                BundleProduct,
+            ):
+                expanded.extend(
+                    self._expand_bundle_components(
+                        product=component.product,
+                        bundle_quantity=required_quantity,
+                    )
+                )
+            else:
+                expanded.append(
+                    (
+                        component.product.sku,
+                        required_quantity,
+                    )
+                )
+
+        return expanded
 
     def release_order_reservations(
         self,
@@ -510,16 +608,12 @@ class OrderService:
         shipped_serial_numbers = []
 
         for reservation in order_reservations:
-            serial_numbers = (
+            shipped_serial_numbers.extend(
                 self.inventory_service.consume_reservation(
                     inventory=inventory,
                     reservation_id=reservation.reservation_id,
                     timestamp=timestamp,
                 )
-            )
-
-            shipped_serial_numbers.extend(
-                serial_numbers
             )
 
         self.order_state_machine.transition(
@@ -659,7 +753,7 @@ class OrderService:
             )
         )
 
-        if existing_reference:
+        if existing_reference is not None:
             raise ValueError(
                 "Payment reference already exists"
             )

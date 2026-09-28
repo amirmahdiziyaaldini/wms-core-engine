@@ -87,6 +87,18 @@ RMA
        v
 Refund
 
+
+## Order Cancellation Policy
+
+Order cancellation is supported before shipment.
+
+- CREATED orders can be cancelled directly.
+- RESERVED orders are cancelled by releasing all active reservations.
+- PAID orders can also be cancelled before shipment; their inventory reservations are released.
+- A payment transaction remains recorded as a financial/audit record and is not automatically deleted when an order is cancelled.
+- Refunds are handled separately through the return/refund flow.
+- SHIPPED and DELIVERED orders cannot be cancelled through the normal cancellation operation and must use the RMA/return process.
+
 ## Technologies
 
 - Python
