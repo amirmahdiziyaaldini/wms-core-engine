@@ -5,6 +5,7 @@ import pytest
 
 from app.domain.enums.order_status import OrderStatus
 from app.domain.enums.return_reason import ReturnReason
+from app.domain.enums.return_status import ReturnStatus
 from app.domain.models.order import Order
 from app.domain.models.order_item import OrderItem
 from app.domain.models.return_item import ReturnItem
@@ -57,6 +58,24 @@ def create_return_request(
             )
         ],
     )
+
+
+def test_receiving_moves_return_request_to_received_state():
+    service = ReturnReceivingService()
+    return_request = create_return_request()
+
+    received_at = datetime(2026, 9, 6, 15, 30)
+
+    receipt = service.receive(
+        return_request=return_request,
+        sku="LAPTOP-01",
+        quantity=1,
+        received_at=received_at,
+    )
+
+    assert receipt.received_at == received_at
+    assert return_request.status == ReturnStatus.RECEIVED_AT_WAREHOUSE
+    assert return_request.received_at_warehouse == received_at
 
 
 def test_received_item_is_stored_in_return_quarantine():

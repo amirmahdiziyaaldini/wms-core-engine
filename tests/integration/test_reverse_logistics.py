@@ -90,12 +90,6 @@ def move_return_to_qc(return_request, return_receipt):
 
     state_machine.transition(
         return_request,
-        ReturnStatus.RECEIVED_AT_WAREHOUSE,
-        return_receipt.received_at,
-    )
-
-    state_machine.transition(
-        return_request,
         ReturnStatus.QC_INSPECTION,
         return_receipt.received_at,
     )

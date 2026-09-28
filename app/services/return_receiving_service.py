@@ -4,6 +4,7 @@ from app.domain.enums.return_status import ReturnStatus
 from app.domain.models.return_receipt import ReturnReceipt
 from app.domain.models.return_request import ReturnRequest
 from app.domain.models.shipment import Shipment
+from app.domain.states.return_state_machine import ReturnStateMachine
 from app.repositories.shipment_repository import ShipmentRepository
 
 
@@ -26,6 +27,8 @@ class ReturnReceivingService:
             if shipment_repository is not None
             else ShipmentRepository()
         )
+
+        self.return_state_machine = ReturnStateMachine()
 
     def receive(
         self,
@@ -138,7 +141,7 @@ class ReturnReceivingService:
                         f"Serial number {serial_number} is not part of the return request"
                     )
 
-        return ReturnReceipt(
+        receipt = ReturnReceipt(
             receipt_id=receipt_id,
             return_id=return_request.return_id,
             sku=sku,
@@ -148,3 +151,12 @@ class ReturnReceivingService:
             status=ReturnStatus.RECEIVED_AT_WAREHOUSE.value,
             received_at=received_at,
         )
+
+        if return_request.status == ReturnStatus.REQUESTED:
+            self.return_state_machine.transition(
+                return_request,
+                ReturnStatus.RECEIVED_AT_WAREHOUSE,
+                timestamp=receipt.received_at,
+            )
+
+        return receipt
