@@ -138,6 +138,63 @@ def test_get_sellable_quantity_when_component_is_missing():
     assert bundle.get_sellable_quantity(available_stock) == 0
 
 
+def test_get_sellable_quantity_when_stock_exactly_matches_requirement():
+    book = create_book()
+    flash_drive = create_flash_drive()
+
+    bundle = create_bundle(
+        [
+            BundleComponent(book, 1),
+            BundleComponent(flash_drive, 2),
+        ]
+    )
+
+    available_stock = {
+        "BOOK-001": 1,
+        "FLASH-001": 2,
+    }
+
+    assert bundle.get_sellable_quantity(available_stock) == 1
+
+
+def test_get_sellable_quantity_when_component_stock_is_zero():
+    book = create_book()
+    flash_drive = create_flash_drive()
+
+    bundle = create_bundle(
+        [
+            BundleComponent(book, 1),
+            BundleComponent(flash_drive, 2),
+        ]
+    )
+
+    available_stock = {
+        "BOOK-001": 10,
+        "FLASH-001": 0,
+    }
+
+    assert bundle.get_sellable_quantity(available_stock) == 0
+
+
+def test_get_sellable_quantity_is_limited_by_smallest_component():
+    book = create_book()
+    flash_drive = create_flash_drive()
+
+    bundle = create_bundle(
+        [
+            BundleComponent(book, 1),
+            BundleComponent(flash_drive, 2),
+        ]
+    )
+
+    available_stock = {
+        "BOOK-001": 100,
+        "FLASH-001": 5,
+    }
+
+    assert bundle.get_sellable_quantity(available_stock) == 2
+
+
 def test_nested_bundle():
     book = create_book()
     flash_drive = create_flash_drive()

@@ -36,12 +36,10 @@ def test_create_variant_product():
     assert variant.barcode == "987654321"
     assert variant.category == "Clothing"
     assert variant.base_price == Decimal("1000000")
-
     assert variant.attributes == {
         "color": "Red",
         "size": "XL",
     }
-
     assert variant.price_modifier == Decimal("150000")
     assert variant.parent_product == parent_product
 
@@ -59,6 +57,22 @@ def test_variant_attributes_must_be_dict():
             price_modifier=Decimal("150000"),
             parent_product=parent_product,
         )
+
+
+def test_variant_accepts_empty_attributes_dict():
+    parent_product = create_parent_product()
+
+    variant = VariantProduct(
+        sku="TSHIRT-BASIC",
+        name="Basic T-Shirt",
+        barcode="987654321",
+        category="Clothing",
+        attributes={},
+        price_modifier=Decimal("0"),
+        parent_product=parent_product,
+    )
+
+    assert variant.attributes == {}
 
 
 def test_variant_price_modifier_must_be_decimal():
@@ -150,6 +164,7 @@ def test_variant_get_price_with_zero_modifier():
     )
 
     assert variant.get_price() == Decimal("1000000")
+    assert variant.price_get() == Decimal("1000000")
 
 
 def test_variant_get_price_with_negative_modifier():
@@ -169,6 +184,27 @@ def test_variant_get_price_with_negative_modifier():
     )
 
     assert variant.get_price() == Decimal("900000")
+    assert variant.price_get() == Decimal("900000")
+
+
+def test_variant_final_price_can_be_exactly_zero():
+    parent_product = create_parent_product()
+
+    variant = VariantProduct(
+        sku="TSHIRT-FREE",
+        name="Free T-Shirt",
+        barcode="777888999",
+        category="Clothing",
+        attributes={
+            "color": "White",
+            "size": "M",
+        },
+        price_modifier=Decimal("-1000000"),
+        parent_product=parent_product,
+    )
+
+    assert variant.get_price() == Decimal("0")
+    assert variant.price_get() == Decimal("0")
 
 
 def test_variant_final_price_cannot_be_negative():
@@ -189,6 +225,26 @@ def test_variant_final_price_cannot_be_negative():
 
     with pytest.raises(ValueError):
         variant.get_price()
+
+
+def test_variant_sku_is_independent_from_parent_sku():
+    parent_product = create_parent_product()
+
+    variant = VariantProduct(
+        sku="TSHIRT-RED-XL",
+        name="T-Shirt Red XL",
+        barcode="987654321",
+        category="Clothing",
+        attributes={
+            "color": "Red",
+            "size": "XL",
+        },
+        price_modifier=Decimal("150000"),
+        parent_product=parent_product,
+    )
+
+    assert variant.sku != parent_product.sku
+    assert variant.parent_product.sku == "TSHIRT-001"
 
 
 def test_variant_to_dict():

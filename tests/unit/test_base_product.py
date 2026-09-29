@@ -31,11 +31,55 @@ def test_empty_sku():
         )
 
 
+def test_whitespace_sku():
+    with pytest.raises(ValueError):
+        BaseProduct(
+            sku="   ",
+            name="Python Fundamentals",
+            barcode="123456789",
+            category="Books",
+            base_price=Decimal("500000"),
+        )
+
+
+def test_sku_must_be_string():
+    with pytest.raises(ValueError):
+        BaseProduct(
+            sku=123,
+            name="Python Fundamentals",
+            barcode="123456789",
+            category="Books",
+            base_price=Decimal("500000"),
+        )
+
+
 def test_empty_name():
     with pytest.raises(ValueError):
         BaseProduct(
             sku="BOOK-001",
             name="",
+            barcode="123456789",
+            category="Books",
+            base_price=Decimal("500000"),
+        )
+
+
+def test_whitespace_name():
+    with pytest.raises(ValueError):
+        BaseProduct(
+            sku="BOOK-001",
+            name="   ",
+            barcode="123456789",
+            category="Books",
+            base_price=Decimal("500000"),
+        )
+
+
+def test_name_must_be_string():
+    with pytest.raises(ValueError):
+        BaseProduct(
+            sku="BOOK-001",
+            name=123,
             barcode="123456789",
             category="Books",
             base_price=Decimal("500000"),
@@ -53,6 +97,28 @@ def test_empty_barcode():
         )
 
 
+def test_whitespace_barcode():
+    with pytest.raises(ValueError):
+        BaseProduct(
+            sku="BOOK-001",
+            name="Python Fundamentals",
+            barcode="   ",
+            category="Books",
+            base_price=Decimal("500000"),
+        )
+
+
+def test_barcode_must_be_string():
+    with pytest.raises(ValueError):
+        BaseProduct(
+            sku="BOOK-001",
+            name="Python Fundamentals",
+            barcode=123456789,
+            category="Books",
+            base_price=Decimal("500000"),
+        )
+
+
 def test_empty_category():
     with pytest.raises(ValueError):
         BaseProduct(
@@ -60,6 +126,28 @@ def test_empty_category():
             name="Python Fundamentals",
             barcode="123456789",
             category="",
+            base_price=Decimal("500000"),
+        )
+
+
+def test_whitespace_category():
+    with pytest.raises(ValueError):
+        BaseProduct(
+            sku="BOOK-001",
+            name="Python Fundamentals",
+            barcode="123456789",
+            category="   ",
+            base_price=Decimal("500000"),
+        )
+
+
+def test_category_must_be_string():
+    with pytest.raises(ValueError):
+        BaseProduct(
+            sku="BOOK-001",
+            name="Python Fundamentals",
+            barcode="123456789",
+            category=123,
             base_price=Decimal("500000"),
         )
 
@@ -96,6 +184,8 @@ def test_zero_base_price():
     )
 
     assert product.base_price == Decimal("0")
+    assert product.price_get() == Decimal("0")
+    assert product.get_price() == Decimal("0")
 
 
 def test_price_get():
@@ -120,6 +210,18 @@ def test_get_price():
     )
 
     assert product.get_price() == Decimal("500000")
+
+
+def test_price_methods_return_same_value():
+    product = BaseProduct(
+        sku="BOOK-001",
+        name="Python Fundamentals",
+        barcode="123456789",
+        category="Books",
+        base_price=Decimal("750000"),
+    )
+
+    assert product.price_get() == product.get_price()
 
 
 def test_to_dict():
