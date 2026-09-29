@@ -19,6 +19,11 @@ def create_product(price=Decimal("100")):
     )
 
 
+class ProductWithInvalidPrice(BaseProduct):
+    def get_price(self):
+        return "100"
+
+
 def test_quantity_1_uses_base_price():
     strategy = TieredPricingStrategy()
 
@@ -139,6 +144,73 @@ def test_negative_quantity_is_rejected():
         )
 
 
+def test_non_integer_quantity_is_rejected():
+    strategy = TieredPricingStrategy()
+
+    with pytest.raises(
+        ValueError,
+        match="Quantity must be an integer",
+    ):
+        strategy.calculate_unit_price(
+            product=create_product(),
+            quantity=1.5,
+        )
+
+
+def test_boolean_quantity_is_rejected():
+    strategy = TieredPricingStrategy()
+
+    with pytest.raises(
+        ValueError,
+        match="Quantity must be an integer",
+    ):
+        strategy.calculate_unit_price(
+            product=create_product(),
+            quantity=True,
+        )
+
+
+def test_invalid_product_is_rejected():
+    strategy = TieredPricingStrategy()
+
+    with pytest.raises(
+        ValueError,
+        match="Product must be a BaseProduct",
+    ):
+        strategy.calculate_unit_price(
+            product="BOOK-001",
+            quantity=1,
+        )
+
+
+def test_product_price_must_be_decimal():
+    strategy = TieredPricingStrategy()
+    product = ProductWithInvalidPrice(
+        sku="BOOK-001",
+        name="Python Book",
+        barcode="123456789",
+        category="Books",
+        base_price=Decimal("100"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Product price must be a Decimal",
+    ):
+        strategy.calculate_unit_price(
+            product=product,
+            quantity=1,
+        )
+
+
+def test_custom_tiers_cannot_be_empty():
+    with pytest.raises(
+        ValueError,
+        match="At least one price tier is required",
+    ):
+        TieredPricingStrategy(tiers=[])
+
+
 def test_custom_tiers_cannot_have_gap():
     with pytest.raises(
         ValueError,
@@ -250,6 +322,44 @@ def test_discount_above_one_is_rejected():
         )
 
 
+def test_discount_zero_is_allowed():
+    strategy = TieredPricingStrategy(
+        tiers=[
+            PriceTier(
+                min_quantity=1,
+                max_quantity=None,
+                discount_rate=Decimal("0"),
+            ),
+        ]
+    )
+
+    price = strategy.calculate_unit_price(
+        product=create_product(),
+        quantity=100,
+    )
+
+    assert price == Decimal("100")
+
+
+def test_discount_one_is_allowed():
+    strategy = TieredPricingStrategy(
+        tiers=[
+            PriceTier(
+                min_quantity=1,
+                max_quantity=None,
+                discount_rate=Decimal("1"),
+            ),
+        ]
+    )
+
+    price = strategy.calculate_unit_price(
+        product=create_product(),
+        quantity=1,
+    )
+
+    assert price == Decimal("0")
+
+
 def test_min_quantity_must_be_integer():
     with pytest.raises(
         ValueError,
@@ -344,3 +454,85 @@ def test_max_quantity_cannot_be_lower_than_min_quantity():
                 ),
             ]
         )
+
+
+def test_discount_rate_must_be_decimal():
+    with pytest.raises(
+        ValueError,
+        match="Tier discount rate must be a Decimal",
+    ):
+        TieredPricingStrategy(
+            tiers=[
+                PriceTier(
+                    min_quantity=1,
+                    max_quantity=None,
+                    discount_rate=0.10,
+                ),
+            ]
+        )
+
+
+def test_exact_custom_tier_boundaries_are_respected():
+    strategy = TieredPricingStrategy(
+        tiers=[
+            PriceTier(
+                min_quantity=1,
+                max_quantity=3,
+                discount_rate=Decimal("0"),
+            ),
+            PriceTier(
+                min_quantity=4,
+                max_quantity=6,
+                discount_rate=Decimal("0.10"),
+            ),
+            PriceTier(
+                min_quantity=7,
+                max_quantity=None,
+                discount_rate=Decimal("0.20"),
+            ),
+        ]
+    )
+
+    assert strategy.calculate_unit_price(create_product(), 3) == Decimal("100")
+    assert strategy.calculate_unit_price(create_product(), 4) == Decimal("90")
+    assert strategy.calculate_unit_price(create_product(), 6) == Decimal("90")
+    assert strategy.calculate_unit_price(create_product(), 7) == Decimal("80")
+
+
+def test_custom_single_open_ended_tier_works():
+    strategy = TieredPricingStrategy(
+        tiers=[
+            PriceTier(
+                min_quantity=1,
+                max_quantity=None,
+                discount_rate=Decimal("0.15"),
+            ),
+        ]
+    )
+
+    price = strategy.calculate_unit_price(
+        product=create_product(),
+        quantity=1000,
+    )
+
+    assert price == Decimal("85")
+
+
+def test_price_is_calculated_using_decimal_arithmetic():
+    strategy = TieredPricingStrategy(
+        tiers=[
+            PriceTier(
+                min_quantity=1,
+                max_quantity=None,
+                discount_rate=Decimal("0.15"),
+            ),
+        ]
+    )
+
+    price = strategy.calculate_unit_price(
+        product=create_product(Decimal("99.99")),
+        quantity=1,
+    )
+
+    assert isinstance(price, Decimal)
+    assert price == Decimal("84.9915")
