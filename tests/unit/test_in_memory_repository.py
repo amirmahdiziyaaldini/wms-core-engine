@@ -2,10 +2,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from app.repositories.in_memory_repository import (
-    InMemoryRepository,
-    NotFoundException,
-)
+from app.domain.exceptions.entity_not_found import EntityNotFoundError
+from app.repositories.in_memory_repository import InMemoryRepository
 
 
 @dataclass
@@ -15,65 +13,73 @@ class FakeEntity:
 
 
 def create_repository() -> InMemoryRepository[FakeEntity]:
-    return InMemoryRepository(lambda entity: entity.entity_id)
+    return InMemoryRepository()
 
 
 def test_save_adds_entity_to_repository():
     repository = create_repository()
     entity = FakeEntity("ID-001", "Laptop")
 
-    result = repository.save(entity)
+    result = repository.save("ID-001", entity)
 
     assert result is entity
-    assert repository.get_by_id("ID-001") is entity
+    assert repository.get("ID-001") is entity
 
 
-def test_save_updates_existing_entity_with_same_id():
+def test_save_rejects_duplicate_entity_id():
     repository = create_repository()
 
     first = FakeEntity("ID-001", "Laptop")
     second = FakeEntity("ID-001", "Updated Laptop")
 
-    repository.save(first)
-    repository.save(second)
+    repository.save("ID-001", first)
 
-    assert repository.get_by_id("ID-001") is second
-    assert repository.list() == [second]
+    with pytest.raises(ValueError):
+        repository.save("ID-001", second)
+
+    assert repository.get("ID-001") is first
 
 
-def test_get_by_id_returns_entity():
+def test_get_returns_entity():
     repository = create_repository()
     entity = FakeEntity("ID-001", "Laptop")
 
-    repository.save(entity)
+    repository.save("ID-001", entity)
 
-    result = repository.get_by_id("ID-001")
+    result = repository.get("ID-001")
 
     assert result is entity
 
 
-def test_get_by_id_raises_not_found_exception():
+def test_get_missing_entity_raises_entity_not_found_error():
     repository = create_repository()
 
-    with pytest.raises(NotFoundException):
-        repository.get_by_id("ID-999")
+    with pytest.raises(EntityNotFoundError) as exc_info:
+        repository.get("ID-999")
+
+    assert exc_info.value.entity_type == "InMemoryRepository"
+    assert exc_info.value.entity_id == "ID-999"
+    assert str(exc_info.value) == "InMemoryRepository not found: ID-999"
 
 
 def test_delete_removes_entity():
     repository = create_repository()
     entity = FakeEntity("ID-001", "Laptop")
 
-    repository.save(entity)
+    repository.save("ID-001", entity)
     repository.delete("ID-001")
 
     assert repository.list() == []
 
 
-def test_delete_unknown_entity_raises_not_found_exception():
+def test_delete_missing_entity_raises_entity_not_found_error():
     repository = create_repository()
 
-    with pytest.raises(NotFoundException):
+    with pytest.raises(EntityNotFoundError) as exc_info:
         repository.delete("ID-999")
+
+    assert exc_info.value.entity_type == "InMemoryRepository"
+    assert exc_info.value.entity_id == "ID-999"
 
 
 def test_list_returns_all_entities():
@@ -82,8 +88,8 @@ def test_list_returns_all_entities():
     first = FakeEntity("ID-001", "Laptop")
     second = FakeEntity("ID-002", "Keyboard")
 
-    repository.save(first)
-    repository.save(second)
+    repository.save("ID-001", first)
+    repository.save("ID-002", second)
 
     result = repository.list()
 
@@ -92,9 +98,6 @@ def test_list_returns_all_entities():
 
 def test_repository_storage_is_not_exposed_directly():
     repository = create_repository()
-    entity = FakeEntity("ID-001", "Laptop")
-
-    repository.save(entity)
 
     assert not hasattr(repository, "storage")
     assert hasattr(repository, "_storage")
@@ -104,25 +107,54 @@ def test_save_rejects_none_entity():
     repository = create_repository()
 
     with pytest.raises(ValueError):
-        repository.save(None)
+        repository.save("ID-001", None)
 
 
-def test_repository_rejects_invalid_entity_id():
+def test_save_rejects_invalid_entity_id():
+    repository = create_repository()
+    entity = FakeEntity("ID-001", "Laptop")
+
+    with pytest.raises(ValueError):
+        repository.save("", entity)
+
+
+def test_get_rejects_empty_entity_id():
     repository = create_repository()
 
     with pytest.raises(ValueError):
-        repository.save(FakeEntity("", "Laptop"))
+        repository.get("")
 
 
-def test_repository_rejects_empty_lookup_id():
-    repository = create_repository()
-
-    with pytest.raises(ValueError):
-        repository.get_by_id("")
-
-
-def test_repository_rejects_empty_delete_id():
+def test_delete_rejects_empty_entity_id():
     repository = create_repository()
 
     with pytest.raises(ValueError):
         repository.delete("")
+
+
+def test_exists_returns_true_for_existing_entity():
+    repository = create_repository()
+    entity = FakeEntity("ID-001", "Laptop")
+
+    repository.save("ID-001", entity)
+
+    assert repository.exists("ID-001") is True
+
+
+def test_exists_returns_false_for_missing_entity():
+    repository = create_repository()
+
+    assert repository.exists("ID-999") is False
+
+
+def test_clear_removes_all_entities():
+    repository = create_repository()
+
+    repository.save("ID-001", FakeEntity("ID-001", "Laptop"))
+    repository.save("ID-002", FakeEntity("ID-002", "Keyboard"))
+
+    repository.clear()
+
+    assert repository.list() == []
+    assert repository.exists("ID-001") is False
+    assert repository.exists("ID-002") is False
