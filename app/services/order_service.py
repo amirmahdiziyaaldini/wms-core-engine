@@ -303,6 +303,18 @@ class OrderService:
                         "Order item is already reserved"
                     )
 
+        if not self.order_state_machine.can_transition(
+            order.status,
+            OrderStatus.RESERVED,
+        ):
+            raise ValueError(
+                f"Invalid order transition: "
+                f"{order.status.value} -> "
+                f"{OrderStatus.RESERVED.value}"
+            )
+
+        original_order_state = dict(vars(order))
+
         reservation_plan = self._build_reservation_plan(
             order=order,
             catalog=catalog,
@@ -372,18 +384,21 @@ class OrderService:
                     reservation
                 )
 
+            self.order_state_machine.transition(
+                order,
+                OrderStatus.RESERVED,
+            )
+
         except Exception:
             for reservation in committed_reservations:
-                inventory.release_reservation(
-                    reservation.reservation_id
-                )
+                if reservation.reservation_id in inventory.reservations:
+                    inventory.release_reservation(
+                        reservation.reservation_id
+                    )
 
+            vars(order).clear()
+            vars(order).update(original_order_state)
             raise
-
-        self.order_state_machine.transition(
-            order,
-            OrderStatus.RESERVED,
-        )
 
         return reservations
 
@@ -491,8 +506,10 @@ class OrderService:
                 )
 
         for reservation_id in reservation_ids:
-            inventory.release_reservation(
-                reservation_id
+            self.inventory_service.release_reservation(
+                inventory=inventory,
+                reservation_id=reservation_id,
+                reference_id=order.order_id,
             )
 
     def cancel_order(
@@ -563,10 +580,8 @@ class OrderService:
                 "Timestamp must be a datetime"
             )
 
-        existing_shipments = (
-            self.shipment_repository.get_by_order_id(
-                order.order_id
-            )
+        existing_shipments = self.shipment_repository.get_by_order_id(
+            order.order_id
         )
 
         if existing_shipments:
@@ -605,40 +620,84 @@ class OrderService:
                 "Order reservations are incomplete"
             )
 
-        shipped_serial_numbers = []
+        original_order_state = dict(vars(order))
+        original_reservations = dict(inventory.reservations)
+        original_batches = {
+            batch.batch_id: (
+                batch.quantity,
+                (
+                    list(batch.serial_numbers)
+                    if batch.serial_numbers is not None
+                    else None
+                ),
+            )
+            for batch in inventory.batches
+        }
+        original_ledger_transactions = list(
+            self.inventory_service.ledger.transactions
+        )
 
-        for reservation in order_reservations:
-            shipped_serial_numbers.extend(
-                self.inventory_service.consume_reservation(
-                    inventory=inventory,
-                    reservation_id=reservation.reservation_id,
-                    timestamp=timestamp,
+        shipment = None
+
+        try:
+            shipped_serial_numbers = []
+
+            for reservation in order_reservations:
+                shipped_serial_numbers.extend(
+                    self.inventory_service.consume_reservation(
+                        inventory=inventory,
+                        reservation_id=reservation.reservation_id,
+                        timestamp=timestamp,
+                    )
                 )
+
+            self.order_state_machine.transition(
+                order,
+                OrderStatus.SHIPPED,
+                timestamp=timestamp,
             )
 
-        self.order_state_machine.transition(
-            order,
-            OrderStatus.SHIPPED,
-            timestamp=timestamp,
-        )
+            shipment_id = f"SHP-{order.order_id}"
 
-        shipment_id = (
-            f"SHP-{order.order_id}"
-        )
+            shipment = Shipment(
+                shipment_id=shipment_id,
+                order_id=order.order_id,
+                warehouse_id=inventory.warehouse.warehouse_id,
+                shipped_at=order.shipped_at,
+                serial_numbers=shipped_serial_numbers,
+            )
 
-        shipment = Shipment(
-            shipment_id=shipment_id,
-            order_id=order.order_id,
-            warehouse_id=inventory.warehouse.warehouse_id,
-            shipped_at=order.shipped_at,
-            serial_numbers=shipped_serial_numbers,
-        )
+            self.shipment_repository.save(shipment)
 
-        self.shipment_repository.save(
-            shipment
-        )
+            return shipment
 
-        return shipment
+        except Exception:
+            vars(order).clear()
+            vars(order).update(original_order_state)
+
+            inventory.reservations.clear()
+            inventory.reservations.update(original_reservations)
+
+            for batch in inventory.batches:
+                if batch.batch_id not in original_batches:
+                    continue
+
+                quantity, serial_numbers = original_batches[batch.batch_id]
+                batch.quantity = quantity
+                batch.serial_numbers = (
+                    list(serial_numbers)
+                    if serial_numbers is not None
+                    else None
+                )
+
+            self.inventory_service.ledger.transactions = original_ledger_transactions
+
+            if shipment is not None:
+                self.shipment_repository.delete(
+                    shipment.shipment_id
+                )
+
+            raise
 
     def deliver_order(
         self,

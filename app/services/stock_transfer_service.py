@@ -143,6 +143,21 @@ class StockTransferService:
             for batch in self.source_inventory.batches
         }
 
+        original_transfer_status = transfer.status
+        original_dispatched_at = transfer.dispatched_at
+        original_item_allocations = {
+            id(item): (
+                dict(item.batch_allocations),
+                {
+                    batch_id: list(serials)
+                    for batch_id, serials in item.serial_allocations.items()
+                },
+            )
+            for item in transfer.items
+        }
+        original_transactions = list(
+            self.inventory_service.ledger.transactions
+        )
         prepared_items = []
 
         try:
@@ -255,34 +270,32 @@ class StockTransferService:
         except Exception:
             for batch in self.source_inventory.batches:
                 if batch.batch_id in original_quantities:
+                    serial_numbers = original_serial_numbers[
+                        batch.batch_id
+                    ]
+                    if serial_numbers is None:
+                        batch.serial_numbers = None
+                    else:
+                        batch.serial_numbers = list(serial_numbers)
                     batch.quantity = original_quantities[
                         batch.batch_id
                     ]
 
-                if batch.batch_id in original_serial_numbers:
-                    serial_numbers = original_serial_numbers[
-                        batch.batch_id
-                    ]
-
-                    if serial_numbers is None:
-                        batch.serial_numbers = None
-                    else:
-                        batch.serial_numbers = list(
-                            serial_numbers
-                        )
-
             ledger = self.inventory_service.ledger
+            ledger.transactions[:] = original_transactions
 
-            ledger.transactions = [
-                transaction
-                for transaction in ledger.transactions
-                if transaction.reference_id
-                != transfer.transfer_id
-            ]
+            transfer.status = original_transfer_status
+            transfer.dispatched_at = original_dispatched_at
 
             for item in transfer.items:
-                item.batch_allocations = {}
-                item.serial_allocations = {}
+                batch_allocations, serial_allocations = original_item_allocations[
+                    id(item)
+                ]
+                item.batch_allocations = dict(batch_allocations)
+                item.serial_allocations = {
+                    batch_id: list(serials)
+                    for batch_id, serials in serial_allocations.items()
+                }
 
             raise
 

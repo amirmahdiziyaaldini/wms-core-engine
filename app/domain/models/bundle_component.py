@@ -12,7 +12,7 @@ class BundleComponent:
                 "Product must be a BaseProduct"
             )
 
-        if not isinstance(required_quantity, int):
+        if not isinstance(required_quantity, int) or isinstance(required_quantity, bool):
             raise ValueError(
                 "Required quantity must be an integer"
             )

@@ -91,7 +91,7 @@ def serialize_entity(
 ) -> dict[str, Any]:
 
     if entity is None:
-        return {}
+        raise ValueError("Entity cannot be None")
 
     if not hasattr(
         entity,

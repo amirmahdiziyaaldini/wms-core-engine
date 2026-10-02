@@ -94,18 +94,26 @@ class InventoryService:
         if not reference_id.strip():
             raise ValueError("Reference ID cannot be empty")
 
-        inventory.add_batch(batch)
+        original_batches = list(inventory.batches)
+        original_transactions = list(self.ledger.transactions)
 
-        self.record_transaction(
-            timestamp=timestamp,
-            warehouse=inventory.warehouse,
-            sku=batch.product.sku,
-            quantity=batch.remaining_quantity,
-            transaction_type=InventoryTransactionType.RECEIVE,
-            reference_id=reference_id,
-            batch_id=batch.batch_id,
-            serial_numbers=batch.serial_numbers,
-        )
+        try:
+            inventory.add_batch(batch)
+
+            self.record_transaction(
+                timestamp=timestamp,
+                warehouse=inventory.warehouse,
+                sku=batch.product.sku,
+                quantity=batch.remaining_quantity,
+                transaction_type=InventoryTransactionType.RECEIVE,
+                reference_id=reference_id,
+                batch_id=batch.batch_id,
+                serial_numbers=batch.serial_numbers,
+            )
+        except Exception:
+            inventory.batches[:] = original_batches
+            self.ledger.transactions[:] = original_transactions
+            raise
 
         return batch
 
@@ -175,16 +183,25 @@ class InventoryService:
         if not isinstance(timestamp, datetime):
             raise ValueError("Timestamp must be a datetime")
 
-        inventory.reserve_reservation(reservation)
+        original_reservations = dict(inventory.reservations)
+        original_transactions = list(self.ledger.transactions)
 
-        self.record_transaction(
-            timestamp=timestamp,
-            warehouse=inventory.warehouse,
-            sku=reservation.sku,
-            quantity=reservation.quantity,
-            transaction_type=InventoryTransactionType.RESERVE,
-            reference_id=reference_id or reservation.order_id,
-        )
+        try:
+            inventory.reserve_reservation(reservation)
+
+            self.record_transaction(
+                timestamp=timestamp,
+                warehouse=inventory.warehouse,
+                sku=reservation.sku,
+                quantity=reservation.quantity,
+                transaction_type=InventoryTransactionType.RESERVE,
+                reference_id=reference_id or reservation.order_id,
+            )
+        except Exception:
+            inventory.reservations.clear()
+            inventory.reservations.update(original_reservations)
+            self.ledger.transactions[:] = original_transactions
+            raise
 
         return reservation
 
@@ -217,20 +234,29 @@ class InventoryService:
         if reservation is None:
             raise ValueError("Reservation not found")
 
-        released = inventory.release_reservation(
-            reservation_id
-        )
+        original_reservations = dict(inventory.reservations)
+        original_transactions = list(self.ledger.transactions)
 
-        self.record_transaction(
-            timestamp=timestamp,
-            warehouse=inventory.warehouse,
-            sku=released.sku,
-            quantity=-released.quantity,
-            transaction_type=(
-                InventoryTransactionType.RELEASE_RESERVATION
-            ),
-            reference_id=reference_id or released.order_id,
-        )
+        try:
+            released = inventory.release_reservation(
+                reservation_id
+            )
+
+            self.record_transaction(
+                timestamp=timestamp,
+                warehouse=inventory.warehouse,
+                sku=released.sku,
+                quantity=-released.quantity,
+                transaction_type=(
+                    InventoryTransactionType.RELEASE_RESERVATION
+                ),
+                reference_id=reference_id or released.order_id,
+            )
+        except Exception:
+            inventory.reservations.clear()
+            inventory.reservations.update(original_reservations)
+            self.ledger.transactions[:] = original_transactions
+            raise
 
         return released
 
@@ -351,16 +377,19 @@ class InventoryService:
             for batch, _, _ in prepared_operations
         }
 
+        original_reservations = dict(inventory.reservations)
+        original_transactions = list(self.ledger.transactions)
+        original_shipped_serial_numbers = list(shipped_serial_numbers)
         recorded_transactions = []
 
         try:
             for batch, quantity, serial_numbers in prepared_operations:
-                batch.quantity -= quantity
-
                 if batch.serial_numbers is not None:
                     batch.serial_numbers = batch.serial_numbers[
                         quantity:
                     ]
+
+                batch.quantity -= quantity
 
                 transaction = self.record_transaction(
                     timestamp=timestamp,
@@ -385,19 +414,21 @@ class InventoryService:
         except Exception:
             for batch in inventory.batches:
                 if batch.batch_id in original_quantities:
+                    original_serials = original_serial_numbers[
+                        batch.batch_id
+                    ]
+                    if original_serials is not None:
+                        batch.serial_numbers = list(original_serials)
+                    else:
+                        batch.serial_numbers = None
                     batch.quantity = original_quantities[
                         batch.batch_id
                     ]
 
-                    batch.serial_numbers = original_serial_numbers[
-                        batch.batch_id
-                    ]
-
-            for transaction in recorded_transactions:
-                if transaction in self.ledger.transactions:
-                    self.ledger.transactions.remove(
-                        transaction
-                    )
+            inventory.reservations.clear()
+            inventory.reservations.update(original_reservations)
+            self.ledger.transactions[:] = original_transactions
+            shipped_serial_numbers[:] = original_shipped_serial_numbers
 
             raise
 

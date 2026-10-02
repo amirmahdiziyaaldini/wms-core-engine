@@ -83,6 +83,13 @@ class ReturnReceivingService:
                 "Return request cannot receive items in its current state"
             )
 
+        received_quantities = getattr(return_request, "_received_quantities", {})
+        received_receipt_ids = getattr(return_request, "_received_receipt_ids", [])
+        received_serial_numbers = getattr(return_request, "_received_serial_numbers", {})
+
+        if receipt_id in received_receipt_ids:
+            raise ValueError("Receipt ID already exists for this return")
+
         requested_quantity = 0
         requested_serial_numbers: set[str] = set()
 
@@ -102,9 +109,11 @@ class ReturnReceivingService:
                 f"SKU {sku} is not part of the return request"
             )
 
-        if quantity > requested_quantity:
+        already_received_quantity = received_quantities.get(sku, 0)
+
+        if already_received_quantity + quantity > requested_quantity:
             raise ValueError(
-                "Received quantity cannot exceed requested quantity"
+                "Received quantity cannot exceed requested quantity cumulatively"
             )
 
         if serial_numbers is not None:
@@ -127,7 +136,14 @@ class ReturnReceivingService:
                     shipment.serial_numbers
                 )
 
+            previously_received_serials = set(received_serial_numbers.get(sku, []))
+
             for serial_number in serial_numbers:
+                if serial_number in previously_received_serials:
+                    raise ValueError(
+                        f"Serial number {serial_number} was already received for this return"
+                    )
+
                 if serial_number not in shipment_serial_numbers:
                     raise ValueError(
                         f"Serial number {serial_number} was not sold in the original order"
@@ -158,5 +174,15 @@ class ReturnReceivingService:
                 ReturnStatus.RECEIVED_AT_WAREHOUSE,
                 timestamp=receipt.received_at,
             )
+
+        received_quantities[sku] = already_received_quantity + quantity
+        received_receipt_ids.append(receipt_id)
+
+        if serial_numbers is not None:
+            received_serial_numbers.setdefault(sku, []).extend(serial_numbers)
+
+        return_request._received_quantities = received_quantities
+        return_request._received_receipt_ids = received_receipt_ids
+        return_request._received_serial_numbers = received_serial_numbers
 
         return receipt

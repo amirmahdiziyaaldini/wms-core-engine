@@ -1,171 +1,187 @@
 # WMS Core Engine
 
-A Python-based Warehouse Management System core engine designed using Object-Oriented Programming and Clean Architecture principles.
+The software core of a Warehouse Management System (WMS) built with Python.
 
-The project models the main warehouse and logistics lifecycle, including product catalog management, inventory operations, order processing, stock allocation, shipment, warehouse transfers, reverse logistics, returns, refunds, and JSON persistence.
+This project implements the core business logic for product management, inventory management, order management, stock reservation, payment, shipping, stock transfers, returns, quality control, and refunds using a layered architecture.
 
-## Project Overview
+The goal of the project is to provide a UI-independent core that can later be connected to a Web UI, API, or other user interfaces.
 
-WMS Core Engine is a backend/domain-oriented warehouse management system developed without using web frameworks or external databases.
-
-The main goal of the project is not only to create Python classes, but to design a maintainable domain structure where:
-
-- Business logic is separated from persistence.
-- Domain rules are implemented in appropriate models and services.
-- Order and return lifecycles are controlled through state machines.
-- Inventory allocation strategies are replaceable.
-- Pricing and business rules can be extended independently.
-- Objects can be serialized to and restored from JSON.
-- Business behavior is covered by unit and integration tests.
+---
 
 ## Main Features
 
-### Product Catalog
-
-The catalog supports different product types:
-
-- BaseProduct
-- VariantProduct
-- BundleProduct
-- PerishableProduct
-- SerializedProduct
-
-Product validation includes fields such as:
-
-- SKU
-- Name
-- Barcode
-- Category
-- Base price
-
-### Inventory Management
-
-The inventory module supports:
-
-- Multiple warehouses
-- Stock batches
-- Inventory quantities
-- Stock reservations
-- Stock receiving
-- Inventory ledger
-- Inventory transactions
-- Warehouse transfers
-- Quarantine inventory
-
-### Stock Allocation
-
-The system supports replaceable allocation strategies such as:
-
-- FIFO
-- LIFO
-- FEFO
-
-These strategies allow inventory allocation behavior to be changed without changing the main order processing logic.
-
-### Order Management
-
-Orders support a controlled lifecycle including:
-
-- Order creation
-- Adding order items
-- Pricing
+- Product management
+- Support for different Product types
+- Warehouse and inventory management
+- Batch management
+- Inventory reservation
+- Inventory allocation using FIFO / LIFO / FEFO
+- Order management
+- Pricing and discount calculation
 - Sales rules
-- Stock reservation
-- Payment
-- Shipment
-- Delivery
-- Order state transitions
-
-### Pricing and Business Rules
-
-The pricing system supports:
-
-- Product pricing
-- Price calculation
-- Pricing strategies
-- Sales rules
-- Prerequisite rules
-- Business validation
-
-Business rules are kept outside repositories so that persistence classes remain responsible only for storing and retrieving data.
-
-### Warehouse Transfer
-
-The system supports transferring inventory between warehouses.
-
-The transfer lifecycle includes:
-
-- Source warehouse
-- Destination warehouse
-- Transfer creation
-- Transit state
-- Destination receiving
-- Inventory updates
-- Transfer ledger records
-
-### Reverse Logistics
-
-The reverse logistics flow supports:
-
-- Return requests
-- Return eligibility
-- Return receiving
-- Quality control
-- RMA processing
-- Sellable inventory
-- Quarantine inventory
+- Order state management
+- Payment processing
+- Order shipping
+- Order delivery
+- Stock transfers between warehouses
+- Return management
+- Quality control for returned products
+- Moving returned products to sellable inventory or quarantine
 - Refund processing
+- Inventory and financial transaction recording
+- JSON data persistence and recovery
+- Unit and Integration tests
+- Complete system scenario execution through `main.py`
 
-Return requests use a state machine to control valid state transitions.
+---
 
-### JSON Persistence
+# Architecture
 
-The project provides serialization and deserialization functionality for domain objects.
+The project is designed around separation of concerns.
 
-The persistence layer can store and restore application state using JSON without using:
+The overall system flow is:
 
-- SQL databases
-- SQLite
-- ORM
-- External storage services
+````text
+Product / Catalog
+       |
+       v
+Inventory
+       |
+       v
+Order
+       |
+       v
+Sales Rules
+       |
+       v
+Pricing
+       |
+       v
+Reservation
+       |
+       v
+Payment
+       |
+       v
+Shipment
+       |
+       v
+Delivery
+       |
+       v
+Return Request
+       |
+       v
+Receiving
+       |
+       v
+Quality Control
+       |
+       v
+RMA
+       |
+       +----> Sellable Inventory
+       |
+       +----> Quarantine
+       |
+       v
+Refund
 
-The snapshot mechanism is designed to preserve the state of the system so that objects can be loaded again after application restart.
 
-### Testing
+## Order Cancellation Policy
 
-The project contains both unit and integration tests.
+Order cancellation is supported before shipment.
 
-Tests focus on:
+- CREATED orders can be cancelled directly.
+- RESERVED orders are cancelled by releasing all active reservations.
+- PAID orders can also be cancelled before shipment; their inventory reservations are released.
+- A payment transaction remains recorded as a financial/audit record and is not automatically deleted when an order is cancelled.
+- Refunds are handled separately through the return/refund flow.
+- SHIPPED and DELIVERED orders cannot be cancelled through the normal cancellation operation and must use the RMA/return process.
 
-- Domain behavior
-- Business rules
-- Boundary cases
-- Invalid inputs
-- State transitions
-- Inventory behavior
-- Pricing
+
+## JSON Persistence
+
+The project uses in-memory repositories during runtime and JSON files for persistence.
+
+### Repository Layer
+
+Repositories are responsible only for storing and retrieving domain objects.
+
+The in-memory repository provides:
+
+- `save()`
+- `get()`
+- `list()`
+- `delete()`
+- `exists()`
+
+Missing entities are reported through the domain-level `EntityNotFoundError`.
+
+Business validation is kept in domain models, services, and policies rather than repositories.
+
+### Serialization
+
+The serialization layer converts domain objects into JSON-compatible data.
+
+The following values are handled explicitly:
+
+- `Decimal` → string
+- `date` / `datetime` → ISO-8601 string
+- `Enum` → stable enum representation
+- object references → stable IDs/SKUs
+- polymorphic products → `product_type` discriminator
+
+### Snapshot
+
+A complete system snapshot can be saved and loaded as JSON.
+
+The snapshot contains the runtime state required to restore the system, including:
+
+- Products
+- Warehouses
+- Batches
+- Inventory
+- Reservations
 - Orders
+- Transfers
 - Returns
-- JSON serialization/deserialization
-- Snapshot round trips
-- Integration between major services
+- Inventory Ledger
+- Financial Transactions
+- Payment Transactions
+- Shipments
 
-## Architecture
+Snapshots contain a schema/version field so that the persistence format can evolve safely.
 
-The project follows a layered architecture.
+Saving is performed through a temporary file followed by an atomic replacement of the target file.
 
-```text
-                 WMS Core Engine
-                       |
-        +--------------+--------------+
-        |              |              |
-      Domain        Services      Repositories
-        |              |              |
-   Models/Enums    Business Logic   Persistence
-   Exceptions      Validation       JSON
-   State Machines  Rules/Strategy
-        |
-        +-----------------------------+
-                                      |
-                                  Serialization
-                                  Deserialization
+Loading a missing snapshot file follows the documented load policy and does not silently corrupt existing state.
+
+### Round-trip Persistence
+
+The persistence tests verify the following flow:
+
+`Domain Objects → JSON Snapshot → Load → Domain Objects`
+
+The restored objects must preserve important relationships such as:
+
+- Order → OrderItem
+- Return → Order
+- Batch → Product
+- Inventory → Warehouse
+- Bundle → Component Products
+- Reservations → Order Items
+
+
+## Technologies
+
+- Python
+- pytest
+
+## Installation
+
+Install the project dependencies:
+
+```bash
+pip install -r requirements.txt
+````

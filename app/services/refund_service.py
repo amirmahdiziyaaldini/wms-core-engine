@@ -121,15 +121,29 @@ class RefundService:
             timestamp=timestamp,
         )
 
-        self.financial_transaction_repository.save(
-            transaction
-        )
+        original_state = dict(vars(return_request))
+        saved = False
 
-        self.return_state_machine.transition(
-            return_request,
-            ReturnStatus.REFUNDED,
-            timestamp=timestamp,
-        )
+        try:
+            self.financial_transaction_repository.save(transaction)
+            saved = True
+
+            self.return_state_machine.transition(
+                return_request,
+                ReturnStatus.REFUNDED,
+                timestamp=timestamp,
+            )
+
+        except Exception:
+            vars(return_request).clear()
+            vars(return_request).update(original_state)
+
+            if saved:
+                self.financial_transaction_repository.delete(
+                    transaction.transaction_id
+                )
+
+            raise
 
         return transaction
 
@@ -138,39 +152,84 @@ class RefundService:
         return_request: ReturnRequest,
         order: Order,
     ) -> Decimal:
-        order_items = {
-            item.sku: item
-            for item in order.items
-        }
+        lines_by_sku: dict[str, list[dict]] = {}
+
+        for item in order.items:
+            lines_by_sku.setdefault(
+                item.sku,
+                [],
+            ).append({
+                "item": item,
+                "remaining": item.quantity,
+            })
 
         total = Decimal("0")
 
         for return_item in return_request.items:
-            if return_item.sku not in order_items:
+            lines = lines_by_sku.get(return_item.sku)
+
+            if not lines:
                 raise ValueError(
                     f"SKU {return_item.sku} is not part of the order"
                 )
 
-            order_item = order_items[
-                return_item.sku
-            ]
+            if return_item.order_item_id is not None:
+                matching_lines = [
+                    line
+                    for line in lines
+                    if line["item"].item_id == return_item.order_item_id
+                ]
 
-            if order_item.unit_price is None:
-                raise ValueError(
-                    f"Price snapshot is missing for SKU "
-                    f"{return_item.sku}"
+                if not matching_lines:
+                    raise ValueError(
+                        f"Order item {return_item.order_item_id} is not part of the order"
+                    )
+
+                lines_to_use = matching_lines
+            else:
+                if len(lines) > 1:
+                    raise ValueError(
+                        f"Order item reference is required for duplicate SKU {return_item.sku}"
+                    )
+
+                lines_to_use = lines
+
+            remaining_to_refund = return_item.quantity
+
+            for line in lines_to_use:
+                if remaining_to_refund == 0:
+                    break
+
+                order_item = line["item"]
+
+                if order_item.unit_price is None:
+                    raise ValueError(
+                        f"Price snapshot is missing for SKU {return_item.sku}"
+                    )
+
+                quantity_from_line = min(
+                    remaining_to_refund,
+                    line["remaining"],
                 )
 
-            if return_item.quantity > order_item.quantity:
-                raise ValueError(
-                    f"Return quantity for SKU "
-                    f"{return_item.sku} exceeds order quantity"
+                allocated_discount = (
+                    order_item.discount
+                    * quantity_from_line
+                    / order_item.quantity
                 )
 
-            total += (
-                order_item.unit_price
-                * return_item.quantity
-            )
+                total += (
+                    order_item.unit_price * quantity_from_line
+                    - allocated_discount
+                )
+
+                line["remaining"] -= quantity_from_line
+                remaining_to_refund -= quantity_from_line
+
+            if remaining_to_refund > 0:
+                raise ValueError(
+                    f"Return quantity for SKU {return_item.sku} exceeds order quantity"
+                )
 
         if total <= Decimal("0"):
             raise ValueError(

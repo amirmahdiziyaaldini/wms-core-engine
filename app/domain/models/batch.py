@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from app.domain.models.base_product import BaseProduct
@@ -63,10 +63,13 @@ class Batch:
         if remaining_quantity > quantity and original_quantity == quantity:
             raise ValueError("Remaining quantity cannot exceed quantity")
 
-        if not isinstance(entry_date, date):
+        if isinstance(entry_date, datetime) or not isinstance(entry_date, date):
             raise ValueError("Entry date must be a date")
 
-        if expiry_date is not None and not isinstance(expiry_date, date):
+        if expiry_date is not None and (
+            isinstance(expiry_date, datetime)
+            or not isinstance(expiry_date, date)
+        ):
             raise ValueError("Expiry date must be a date")
 
         if product.expiry_tracking and expiry_date is None:
@@ -159,6 +162,12 @@ class Batch:
                 "Quantity must be between zero and original quantity"
             )
 
+        if isinstance(self.product, SerializedProduct) and self.serial_numbers is not None:
+            if len(self.serial_numbers) != value:
+                raise ValueError(
+                    "Number of serial numbers must match quantity"
+                )
+
         self.remaining_quantity = value
 
     @property
@@ -185,7 +194,7 @@ class Batch:
         if reference_date is None:
             reference_date = date.today()
 
-        if not isinstance(reference_date, date):
+        if isinstance(reference_date, datetime) or not isinstance(reference_date, date):
             raise ValueError("Reference date must be a date")
 
         return self.expiry_date < reference_date

@@ -1,5 +1,8 @@
 import json
 import os
+import tempfile
+import threading
+import time
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
@@ -56,6 +59,20 @@ SECTIONS = (
     "payment_transactions",
     "financial_logs",
 )
+
+SECTION_IDENTIFIER_FIELDS = {
+    "products": "sku",
+    "warehouses": "warehouse_id",
+    "inventories": "warehouse",
+    "orders": "order_id",
+    "returns": "return_id",
+    "transfers": "transfer_id",
+    "return_receipts": "receipt_id",
+    "serialized_units": "serial_number",
+    "shipments": "shipment_id",
+    "payment_transactions": "transaction_id",
+    "financial_logs": "transaction_id",
+}
 
 
 REFERENCE_FIELDS = {
@@ -141,10 +158,35 @@ def build_snapshot(state: dict[str, Any]) -> dict[str, Any]:
                 f"Snapshot section '{section}' must be a list"
             )
 
-        snapshot[section] = [
+        serialized_entities = [
             serialize_entity(entity)
             for entity in entities
         ]
+
+        seen_identifiers: set[str] = set()
+        identifier_field = SECTION_IDENTIFIER_FIELDS.get(section)
+
+        for entity in serialized_entities:
+            if identifier_field is None:
+                continue
+
+            identifier = entity.get(identifier_field)
+            if section == "inventories" and isinstance(identifier, dict):
+                identifier = identifier.get("warehouse_id")
+
+            if not isinstance(identifier, str) or not identifier.strip():
+                raise ValueError(
+                    f"Missing identifier for snapshot section '{section}'"
+                )
+
+            if identifier in seen_identifiers:
+                raise ValueError(
+                    f"Duplicate snapshot identifier: {section} '{identifier}'"
+                )
+
+            seen_identifiers.add(identifier)
+
+        snapshot[section] = serialized_entities
 
     return snapshot
 
@@ -162,12 +204,18 @@ def save_snapshot(
 
     snapshot = build_snapshot(state)
 
-    temporary_path = path.with_suffix(
-        path.suffix + ".tmp"
-    )
+    temporary_path = None
 
     try:
-        with temporary_path.open(
+        file_descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+        )
+        temporary_path = Path(temporary_name)
+
+        with os.fdopen(
+            file_descriptor,
             "w",
             encoding="utf-8",
         ) as file:
@@ -183,13 +231,26 @@ def save_snapshot(
                 file.fileno()
             )
 
-        os.replace(
-            temporary_path,
-            path,
-        )
+        with _SNAPSHOT_SAVE_LOCK:
+            last_error = None
+
+            for _ in range(20):
+                try:
+                    os.replace(
+                        temporary_path,
+                        path,
+                    )
+                    temporary_path = None
+                    break
+                except PermissionError as exc:
+                    last_error = exc
+                    time.sleep(0.01)
+
+            if temporary_path is not None:
+                raise last_error
 
     except OSError as exc:
-        if temporary_path.exists():
+        if temporary_path is not None and temporary_path.exists():
             temporary_path.unlink()
 
         raise ValueError(
@@ -226,6 +287,27 @@ def _validate_snapshot(
                 f"must be a list"
             )
 
+        identifier_field = SECTION_IDENTIFIER_FIELDS.get(section)
+        if identifier_field is not None:
+            seen_identifiers: set[str] = set()
+            for entity in data[section]:
+                if not isinstance(entity, dict):
+                    raise ValueError(
+                        f"Snapshot entity in '{section}' must be a JSON object"
+                    )
+                identifier = entity.get(identifier_field)
+                if section == "inventories" and isinstance(identifier, dict):
+                    identifier = identifier.get("warehouse_id")
+                if not isinstance(identifier, str) or not identifier.strip():
+                    raise ValueError(
+                        f"Missing identifier in snapshot section '{section}'"
+                    )
+                if identifier in seen_identifiers:
+                    raise ValueError(
+                        f"Duplicate snapshot identifier: {section} '{identifier}'"
+                    )
+                seen_identifiers.add(identifier)
+
     return data
 
 
@@ -244,6 +326,11 @@ class SnapshotContext:
         key: str,
         obj: Any,
     ) -> None:
+        if key in self.objects[section]:
+            raise ValueError(
+                f"Duplicate snapshot identifier: {section} '{key}'"
+            )
+
         self.objects[section][key] = obj
 
     def get(
@@ -519,6 +606,302 @@ def _attribute_name(
     return field_name
 
 
+STRING_FIELDS = {
+    "sku",
+    "name",
+    "barcode",
+    "category",
+    "warehouse_id",
+    "batch_id",
+    "product_sku",
+    "reservation_id",
+    "order_id",
+    "order_item_id",
+    "item_id",
+    "customer_id",
+    "reference_id",
+    "transfer_id",
+    "return_id",
+    "receipt_id",
+    "location",
+    "reason",
+    "qc_note",
+    "serial_number",
+    "shipment_id",
+    "reference",
+    "transaction_id",
+    "status",
+}
+
+INTEGER_FIELDS = {
+    "quantity",
+    "original_quantity",
+    "remaining_quantity",
+    "required_quantity",
+}
+
+LIST_FIELDS = {
+    "serial_numbers",
+    "components",
+    "batches",
+    "items",
+    "transactions",
+    "return_receipts",
+    "serialized_units",
+    "shipments",
+    "payment_transactions",
+    "financial_logs",
+    "inventory_logs",
+    "transfers",
+    "previous_returns",
+}
+
+DICT_FIELDS = {
+    "attributes",
+    "batch_allocations",
+    "serial_allocations",
+}
+
+REQUIRED_FIELDS = {
+    "BaseProduct": {"sku", "name", "barcode", "category", "base_price"},
+    "VariantProduct": {"sku", "name", "barcode", "category", "attributes", "price_modifier"},
+    "BundleProduct": {"sku", "name", "barcode", "category", "base_price", "components"},
+    "PerishableProduct": {"sku", "name", "barcode", "category", "base_price"},
+    "SerializedProduct": {"sku", "name", "barcode", "category", "base_price"},
+    "BundleComponent": {"product", "required_quantity"},
+    "Warehouse": {"warehouse_id", "name", "location", "warehouse_type"},
+    "Batch": {"batch_id", "product", "original_quantity", "remaining_quantity", "entry_date"},
+    "Inventory": {"warehouse", "batches", "reservations"},
+    "Reservation": {"reservation_id", "order_id", "order_item_id", "sku", "quantity", "batch_allocations"},
+    "InventoryTransaction": {"timestamp", "warehouse", "sku", "quantity", "transaction_type", "reference_id"},
+    "Order": {"order_id", "status", "customer_id", "created_at", "items"},
+    "OrderItem": {"item_id", "sku", "quantity", "product_name", "unit_price", "discount", "line_total"},
+    "StockTransferItem": {"sku", "quantity", "batch_allocations", "serial_allocations"},
+    "StockTransfer": {"transfer_id", "source", "destination", "items", "created_at", "status"},
+    "ReturnItem": {"sku", "quantity"},
+    "ReturnRequest": {"return_id", "order_id", "reason", "items", "status", "requested_at"},
+    "ReturnReceipt": {"receipt_id", "return_id", "sku", "quantity", "serial_numbers", "location", "status", "received_at"},
+    "SerializedUnit": {"serial_number", "product", "location", "status"},
+    "Shipment": {"shipment_id", "order_id", "warehouse_id", "shipped_at", "serial_numbers", "delivered_at"},
+    "PaymentTransaction": {"transaction_id", "order_id", "reference", "amount", "created_at"},
+    "FinancialTransaction": {"transaction_id", "return_id", "order_id", "amount", "transaction_type", "timestamp"},
+}
+
+_SNAPSHOT_SAVE_LOCK = threading.Lock()
+
+OPTIONAL_STRING_FIELDS = {
+    "customer_id",
+    "product_name",
+    "qc_note",
+    "location",
+    "status",
+    "batch_id",
+    "product_sku",
+    "order_item_id",
+}
+
+def _validate_restored_entity(
+    data: dict[str, Any],
+    entity_type: str,
+) -> None:
+    required_fields = REQUIRED_FIELDS.get(entity_type)
+    if required_fields is None:
+        raise ValueError(f"Unknown entity type: {entity_type}")
+
+    missing_fields = required_fields.difference(data.keys())
+    if entity_type == "VariantProduct" and "parent_product" not in data and "parent_product_sku" not in data:
+        missing_fields.add("parent_product")
+    if missing_fields:
+        raise ValueError(
+            f"Missing required snapshot fields for {entity_type}: "
+            + ", ".join(sorted(missing_fields))
+        )
+
+    for field_name, value in data.items():
+        if field_name == "type":
+            continue
+
+        if field_name in DECIMAL_FIELDS:
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                raise ValueError(
+                    f"Invalid Decimal field '{field_name}' in {entity_type}"
+                )
+            try:
+                Decimal(value)
+            except Exception as exc:
+                raise ValueError(
+                    f"Invalid Decimal field '{field_name}' in {entity_type}"
+                ) from exc
+            continue
+
+        if field_name in DATE_FIELDS:
+            if value is not None:
+                if not isinstance(value, str):
+                    raise ValueError(
+                        f"Invalid date field '{field_name}' in {entity_type}"
+                    )
+                try:
+                    date.fromisoformat(value)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Invalid date field '{field_name}' in {entity_type}"
+                    ) from exc
+            continue
+
+        if field_name.endswith("_at") or field_name in {
+            "timestamp",
+            "created_at",
+            "dispatched_at",
+            "received_at",
+            "shipped_at",
+            "delivered_at",
+        }:
+            if value is not None and not isinstance(value, str):
+                raise ValueError(
+                    f"Invalid datetime field '{field_name}' in {entity_type}"
+                )
+            if isinstance(value, str):
+                try:
+                    datetime.fromisoformat(value)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Invalid datetime field '{field_name}' in {entity_type}"
+                    ) from exc
+            continue
+
+        if field_name in INTEGER_FIELDS:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(
+                    f"Invalid integer field '{field_name}' in {entity_type}"
+                )
+            continue
+
+        if field_name in LIST_FIELDS:
+            if value is not None and not isinstance(value, list):
+                raise ValueError(
+                    f"Invalid list field '{field_name}' in {entity_type}"
+                )
+            continue
+
+        if field_name in DICT_FIELDS:
+            if value is not None and not isinstance(value, dict):
+                raise ValueError(
+                    f"Invalid dictionary field '{field_name}' in {entity_type}"
+                )
+            continue
+
+        if entity_type == "Inventory" and field_name == "reservations":
+            if not isinstance(value, dict):
+                raise ValueError(
+                    "Invalid reservations field in Inventory"
+                )
+            continue
+
+        if field_name in STRING_FIELDS or field_name in OPTIONAL_STRING_FIELDS:
+            if value is not None and not isinstance(value, str):
+                raise ValueError(
+                    f"Invalid string field '{field_name}' in {entity_type}"
+                )
+
+    identifier_fields = {
+        "BaseProduct": "sku",
+        "VariantProduct": "sku",
+        "BundleProduct": "sku",
+        "PerishableProduct": "sku",
+        "SerializedProduct": "sku",
+        "Warehouse": "warehouse_id",
+        "Batch": "batch_id",
+        "Order": "order_id",
+        "Reservation": "reservation_id",
+        "StockTransfer": "transfer_id",
+        "ReturnRequest": "return_id",
+        "ReturnReceipt": "receipt_id",
+        "SerializedUnit": "serial_number",
+        "Shipment": "shipment_id",
+        "PaymentTransaction": "transaction_id",
+        "FinancialTransaction": "transaction_id",
+    }
+
+    identifier_field = identifier_fields.get(entity_type)
+    if identifier_field is not None:
+        identifier = data.get(identifier_field)
+        if not isinstance(identifier, str) or not identifier.strip():
+            raise ValueError(
+                f"{entity_type} identifier cannot be empty"
+            )
+
+    if entity_type in {
+        "BaseProduct",
+        "BundleProduct",
+        "PerishableProduct",
+        "SerializedProduct",
+    }:
+        if Decimal(data["base_price"]) < 0:
+            raise ValueError("Base price cannot be negative")
+
+    if entity_type == "VariantProduct":
+        if Decimal(data["price_modifier"]) < 0:
+            raise ValueError("Price modifier cannot be negative")
+
+    if entity_type == "BundleComponent":
+        required_quantity = data.get("required_quantity")
+        if not isinstance(required_quantity, int) or isinstance(required_quantity, bool) or required_quantity <= 0:
+            raise ValueError("Invalid required quantity")
+
+    if entity_type == "Batch":
+        original_quantity = data.get("original_quantity")
+        remaining_quantity = data.get("remaining_quantity")
+        if not isinstance(original_quantity, int) or isinstance(original_quantity, bool) or original_quantity <= 0:
+            raise ValueError("Invalid batch original quantity")
+        if not isinstance(remaining_quantity, int) or isinstance(remaining_quantity, bool) or remaining_quantity < 0 or remaining_quantity > original_quantity:
+            raise ValueError("Invalid batch remaining quantity")
+        if data.get("unit_cost") is not None and Decimal(data["unit_cost"]) < 0:
+            raise ValueError("Unit cost cannot be negative")
+
+    if entity_type in {"OrderItem", "Reservation", "StockTransferItem", "ReturnItem", "ReturnReceipt"}:
+        quantity = data.get("quantity")
+        if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
+            raise ValueError(f"Invalid quantity in {entity_type}")
+
+    if entity_type == "OrderItem":
+        discount = data.get("discount")
+        if discount is not None and Decimal(discount) < 0:
+            raise ValueError("Order item discount cannot be negative")
+
+    if entity_type == "PaymentTransaction" and Decimal(data["amount"]) <= 0:
+        raise ValueError("Payment amount must be positive")
+
+    if entity_type == "FinancialTransaction" and Decimal(data["amount"]) <= 0:
+        raise ValueError("Financial transaction amount must be positive")
+
+    if entity_type in {"Order", "ReturnRequest", "StockTransfer"}:
+        status = data.get("status")
+        if not isinstance(status, str) or not status.strip():
+            raise ValueError(f"Invalid status in {entity_type}")
+
+    if entity_type == "Reservation":
+        quantity = data.get("quantity")
+        allocations = data.get("batch_allocations", {})
+
+        total_allocated = sum(allocations.values())
+
+        if allocations and total_allocated != quantity:
+            raise ValueError(
+                "Reservation batch allocations do not match reservation quantity"
+            )
+
+    if entity_type == "OrderItem":
+        unit_price = data.get("unit_price")
+        discount = data.get("discount")
+        quantity = data.get("quantity")
+
+        if unit_price is not None and discount is not None:
+            if Decimal(discount) > Decimal(unit_price) * quantity:
+                raise ValueError("Order item discount exceeds gross total")
+
+
 def _restore_entity(
     data: dict[str, Any],
     context: SnapshotContext,
@@ -533,6 +916,8 @@ def _restore_entity(
             f"Unknown entity type: "
             f"{entity_type}"
         )
+
+    _validate_restored_entity(data, entity_type)
 
     key_info = _object_key(
         data
@@ -602,6 +987,79 @@ def _load_section(
     ]
 
 
+def _validate_loaded_graph(
+    result: dict[str, list[Any]],
+) -> None:
+    orders = {
+        order.order_id: order
+        for order in result["orders"]
+        if isinstance(order, Order)
+    }
+
+    for inventory in result["inventories"]:
+        if not isinstance(inventory, Inventory):
+            continue
+
+        batches_by_id = {
+            batch.batch_id: batch
+            for batch in inventory.batches
+        }
+
+        for reservation in inventory.reservations.values():
+            if not isinstance(reservation, Reservation):
+                raise ValueError("Invalid reservation in snapshot")
+
+            order = orders.get(reservation.order_id)
+            if order is None:
+                raise ValueError(
+                    f"Reservation references unknown order: {reservation.order_id}"
+                )
+
+            matching_items = [
+                item
+                for item in order.items
+                if item.item_id == reservation.order_item_id
+            ]
+
+            if not matching_items:
+                raise ValueError(
+                    f"Reservation references unknown order item: {reservation.order_item_id}"
+                )
+
+            if matching_items[0].sku != reservation.sku:
+                raise ValueError(
+                    "Reservation SKU does not match order item SKU"
+                )
+
+            if reservation.batch_allocations:
+                if sum(reservation.batch_allocations.values()) != reservation.quantity:
+                    raise ValueError(
+                        "Reservation batch allocations do not match reservation quantity"
+                    )
+
+                for batch_id, quantity in reservation.batch_allocations.items():
+                    batch = batches_by_id.get(batch_id)
+                    if batch is None:
+                        raise ValueError(
+                            f"Reservation references unknown batch: {batch_id}"
+                        )
+
+                    if batch.product.sku != reservation.sku:
+                        raise ValueError(
+                            "Reservation batch SKU does not match reservation SKU"
+                        )
+
+                    if batch.warehouse_id != inventory.warehouse.warehouse_id:
+                        raise ValueError(
+                            "Reservation batch warehouse does not match inventory warehouse"
+                        )
+
+                    if quantity > batch.quantity:
+                        raise ValueError(
+                            f"Reservation allocation exceeds batch stock: {batch_id}"
+                        )
+
+
 def load_snapshot(
     file_path: str | Path,
 ) -> dict[str, list[Any]]:
@@ -652,5 +1110,7 @@ def load_snapshot(
             data[section],
             context,
         )
+
+    _validate_loaded_graph(result)
 
     return result

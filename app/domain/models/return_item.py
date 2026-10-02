@@ -5,12 +5,22 @@ class ReturnItem:
         sku: str,
         quantity: int,
         serial_numbers: list[str] | None = None,
+        order_item_id: str | None = None,
     ):
         if not isinstance(sku, str):
             raise ValueError("SKU must be a string")
 
         if not sku.strip():
             raise ValueError("SKU cannot be empty")
+
+        if order_item_id is not None:
+            if not isinstance(order_item_id, str):
+                raise ValueError("Order item ID must be a string")
+
+            if not order_item_id.strip():
+                raise ValueError("Order item ID cannot be empty")
+
+            order_item_id = order_item_id.strip()
 
         if isinstance(quantity, bool) or not isinstance(quantity, int):
             raise ValueError("Quantity must be an integer")
@@ -41,6 +51,7 @@ class ReturnItem:
 
                 seen_serials.add(serial_number)
 
-        self.sku = sku
+        self.sku = sku.strip()
         self.quantity = quantity
-        self.serial_numbers = serial_numbers
+        self.serial_numbers = list(serial_numbers) if serial_numbers is not None else None
+        self.order_item_id = order_item_id

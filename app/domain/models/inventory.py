@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from app.domain.enums.warehouse_type import WarehouseType
 from app.domain.models.batch import Batch
@@ -72,9 +72,9 @@ class Inventory:
         sku: str,
         reference_date: date | None = None,
     ) -> int:
-        if reference_date is not None and not isinstance(
-            reference_date,
-            date,
+        if reference_date is not None and (
+            isinstance(reference_date, datetime)
+            or not isinstance(reference_date, date)
         ):
             raise ValueError("Reference date must be a date")
 
@@ -99,10 +99,7 @@ class Inventory:
 
         available_stock = physical_stock - reserved_stock
 
-        if available_stock < 0:
-            raise ValueError("Available stock cannot be negative")
-
-        return available_stock
+        return max(available_stock, 0)
 
     def available_stock(
         self,
@@ -174,6 +171,44 @@ class Inventory:
 
         if reservation.quantity > available_stock:
             raise ValueError("Insufficient available stock")
+
+        if reservation.batch_allocations:
+            batches_by_id = {
+                batch.batch_id: batch
+                for batch in self.batches
+            }
+
+            allocated_quantity = sum(
+                reservation.batch_allocations.values()
+            )
+
+            if allocated_quantity != reservation.quantity:
+                raise ValueError(
+                    "Batch allocations do not match reservation quantity"
+                )
+
+            for batch_id, quantity in reservation.batch_allocations.items():
+                batch = batches_by_id.get(batch_id)
+
+                if batch is None:
+                    raise ValueError(
+                        f"Batch {batch_id} not found in inventory"
+                    )
+
+                if batch.product.sku != reservation.sku:
+                    raise ValueError(
+                        "Allocated batch SKU does not match reservation SKU"
+                    )
+
+                if batch.warehouse_id != self.warehouse.warehouse_id:
+                    raise ValueError(
+                        "Allocated batch does not belong to inventory warehouse"
+                    )
+
+                if batch.quantity < quantity:
+                    raise ValueError(
+                        f"Insufficient stock in batch {batch_id}"
+                    )
 
         self.reservations[
             reservation.reservation_id

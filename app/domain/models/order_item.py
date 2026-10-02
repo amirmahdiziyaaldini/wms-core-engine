@@ -72,10 +72,33 @@ class OrderItem:
 
         self.item_id = item_id
         self.sku = sku
-        self.quantity = quantity
+        self._quantity = quantity
         self.product_name = product_name
         self._unit_price = unit_price
         self._discount = discount
+        self._line_total = self._calculate_line_total()
+
+    @property
+    def quantity(self) -> int:
+        return self._quantity
+
+    @quantity.setter
+    def quantity(self, value: int) -> None:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("Quantity must be an integer")
+
+        if value <= 0:
+            raise ValueError("Quantity must be positive")
+
+        unit_price = getattr(self, "_unit_price", None)
+        discount = getattr(self, "_discount", Decimal("0"))
+
+        if unit_price is not None:
+            gross_total = unit_price * value
+            if discount > gross_total:
+                raise ValueError("Discount cannot exceed gross total")
+
+        self._quantity = value
         self._line_total = self._calculate_line_total()
 
     @property
@@ -88,15 +111,18 @@ class OrderItem:
 
     @property
     def line_total(self) -> Decimal | None:
-        return self._line_total
+        return self._calculate_line_total()
 
     def _calculate_line_total(self) -> Decimal | None:
-        if self._unit_price is None:
+        unit_price = getattr(self, "_unit_price", None)
+        discount = getattr(self, "_discount", Decimal("0"))
+
+        if unit_price is None:
             return None
 
         return (
-            self._unit_price * self.quantity
-        ) - self._discount
+            unit_price * self.quantity
+        ) - discount
 
     def set_price_snapshot(
         self,

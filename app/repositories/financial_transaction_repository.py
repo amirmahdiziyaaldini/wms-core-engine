@@ -76,6 +76,15 @@ class FinancialTransactionRepository:
             if transaction.order_id == order_id
         ]
 
+    def delete(
+        self,
+        transaction_id: str,
+    ) -> FinancialTransaction | None:
+        if not isinstance(transaction_id, str):
+            raise ValueError("Transaction ID must be a string")
+
+        return self._transactions.pop(transaction_id, None)
+
     def list_all(
         self,
     ) -> list[FinancialTransaction]:

@@ -89,6 +89,16 @@ class RMAService:
                 "Return request must be approved before inventory disposition"
             )
 
+        existing_batch = self._find_processed_batch(
+            return_request=return_request,
+            return_receipt=return_receipt,
+            sellable_inventory=sellable_inventory,
+            quarantine_inventory=quarantine_inventory,
+        )
+
+        if existing_batch is not None:
+            return existing_batch
+
         if return_request.qc_result == QCResult.APPROVED:
             target_inventory = sellable_inventory
             target_status = "available"
@@ -231,6 +241,49 @@ class RMAService:
                 unit.status = status
 
             raise
+
+    def _find_processed_batch(
+        self,
+        return_request: ReturnRequest,
+        return_receipt: ReturnReceipt,
+        sellable_inventory: Inventory,
+        quarantine_inventory: Inventory,
+    ) -> Batch | None:
+        target_inventories = (
+            sellable_inventory,
+            quarantine_inventory,
+        )
+
+        for inventory in target_inventories:
+            for batch in inventory.batches:
+                if not batch.batch_id.startswith(
+                    f"RETURN-{return_request.return_id}-{return_receipt.sku}-"
+                ):
+                    continue
+
+                if batch.product.sku != return_receipt.sku:
+                    continue
+
+                if batch.original_quantity != return_receipt.quantity:
+                    raise ValueError(
+                        "Return was already processed with a different quantity"
+                    )
+
+                for transaction in self.inventory_service.ledger.transactions:
+                    if (
+                        transaction.reference_id
+                        == return_request.return_id
+                        and transaction.batch_id
+                        == batch.batch_id
+                    ):
+                        if transaction.sku != return_receipt.sku:
+                            raise ValueError(
+                                "Existing return transaction does not match SKU"
+                            )
+
+                        return batch
+
+        return None
 
     def _validate_inputs(
         self,
