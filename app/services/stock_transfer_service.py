@@ -5,7 +5,6 @@ from app.domain.enums.transfer_status import TransferStatus
 from app.domain.models.batch import Batch
 from app.domain.models.inventory import Inventory
 from app.domain.models.inventory_transaction import InventoryTransaction
-from app.domain.models.inventory_ledger import InventoryLedger
 from app.domain.models.stock_transfer import StockTransfer, StockTransferItem
 from app.services.inventory_service import InventoryService
 
@@ -27,12 +26,17 @@ class StockTransferService:
             source_inventory.warehouse.warehouse_id
             == destination_inventory.warehouse.warehouse_id
         ):
-            raise ValueError("Source and destination warehouses must be different")
+            raise ValueError(
+                "Source and destination warehouses must be different"
+            )
 
         if inventory_service is not None and not isinstance(
-            inventory_service, InventoryService
+            inventory_service,
+            InventoryService,
         ):
-            raise ValueError("Inventory service must be an InventoryService")
+            raise ValueError(
+                "Inventory service must be an InventoryService"
+            )
 
         self.source_inventory = source_inventory
         self.destination_inventory = destination_inventory
@@ -45,21 +49,30 @@ class StockTransferService:
         created_at: datetime,
     ) -> StockTransfer:
         if not isinstance(items, list) or not items:
-            raise ValueError("Transfer must contain at least one item")
+            raise ValueError(
+                "Transfer must contain at least one item"
+            )
 
         normalized_items = []
 
         for item in items:
             if isinstance(item, StockTransferItem):
                 normalized_items.append(item)
+
             elif isinstance(item, dict):
                 normalized_items.append(
                     StockTransferItem(
                         sku=item["sku"],
                         quantity=item["quantity"],
-                        batch_allocations=item.get("batch_allocations"),
+                        batch_allocations=item.get(
+                            "batch_allocations"
+                        ),
+                        serial_allocations=item.get(
+                            "serial_allocations"
+                        ),
                     )
                 )
+
             else:
                 raise ValueError("Invalid transfer item")
 
@@ -78,19 +91,25 @@ class StockTransferService:
         timestamp: datetime | None = None,
     ) -> StockTransfer:
         if not isinstance(transfer, StockTransfer):
-            raise ValueError("Transfer must be a StockTransfer")
+            raise ValueError(
+                "Transfer must be a StockTransfer"
+            )
 
         if timestamp is None:
             timestamp = datetime.now()
 
         if not isinstance(timestamp, datetime):
-            raise ValueError("Timestamp must be a datetime")
+            raise ValueError(
+                "Timestamp must be a datetime"
+            )
 
         if (
             transfer.source.warehouse_id
             != self.source_inventory.warehouse.warehouse_id
         ):
-            raise ValueError("Transfer source does not match source inventory")
+            raise ValueError(
+                "Transfer source does not match source inventory"
+            )
 
         if (
             transfer.destination.warehouse_id
@@ -101,10 +120,14 @@ class StockTransferService:
             )
 
         if transfer.status != TransferStatus.CREATED:
-            raise ValueError("Only CREATED transfers can be dispatched")
+            raise ValueError(
+                "Only CREATED transfers can be dispatched"
+            )
 
         if self.inventory_service is None:
-            raise ValueError("Inventory service is required")
+            raise ValueError(
+                "Inventory service is required"
+            )
 
         original_quantities = {
             batch.batch_id: batch.quantity
@@ -120,12 +143,30 @@ class StockTransferService:
             for batch in self.source_inventory.batches
         }
 
+        original_transfer_status = transfer.status
+        original_dispatched_at = transfer.dispatched_at
+        original_item_allocations = {
+            id(item): (
+                dict(item.batch_allocations),
+                {
+                    batch_id: list(serials)
+                    for batch_id, serials in item.serial_allocations.items()
+                },
+            )
+            for item in transfer.items
+        }
+        original_transactions = list(
+            self.inventory_service.ledger.transactions
+        )
         prepared_items = []
 
         try:
             for item in transfer.items:
                 if (
-                    self.source_inventory.get_available_stock(item.sku)
+                    self.source_inventory.get_available_stock(
+                        item.sku,
+                        timestamp.date(),
+                    )
                     < item.quantity
                 ):
                     raise ValueError(
@@ -140,6 +181,7 @@ class StockTransferService:
                 )
 
                 item.batch_allocations = allocations
+                item.serial_allocations = {}
 
                 for batch_id, quantity in allocations.items():
                     batch = next(
@@ -174,8 +216,17 @@ class StockTransferService:
                                 f"Insufficient serial numbers in batch {batch_id}"
                             )
 
-                        serial_numbers = batch.serial_numbers[:quantity]
-                        batch.serial_numbers = batch.serial_numbers[quantity:]
+                        serial_numbers = batch.serial_numbers[
+                            :quantity
+                        ]
+
+                        item.serial_allocations[
+                            batch_id
+                        ] = list(serial_numbers)
+
+                        batch.serial_numbers = (
+                            batch.serial_numbers[quantity:]
+                        )
 
                     batch.quantity -= quantity
 
@@ -190,14 +241,21 @@ class StockTransferService:
 
             ledger = self.inventory_service.ledger
 
-            for sku, batch, quantity, serial_numbers in prepared_items:
+            for (
+                sku,
+                batch,
+                quantity,
+                serial_numbers,
+            ) in prepared_items:
                 ledger.record(
                     InventoryTransaction(
                         timestamp=timestamp,
                         warehouse=self.source_inventory.warehouse,
                         sku=sku,
                         quantity=-quantity,
-                        transaction_type=InventoryTransactionType.TRANSFER_OUT,
+                        transaction_type=(
+                            InventoryTransactionType.TRANSFER_OUT
+                        ),
                         reference_id=transfer.transfer_id,
                         batch_id=batch.batch_id,
                         serial_numbers=serial_numbers,
@@ -212,26 +270,32 @@ class StockTransferService:
         except Exception:
             for batch in self.source_inventory.batches:
                 if batch.batch_id in original_quantities:
-                    batch.quantity = original_quantities[batch.batch_id]
-
-                if batch.batch_id in original_serial_numbers:
-                    serial_numbers = original_serial_numbers[batch.batch_id]
-
+                    serial_numbers = original_serial_numbers[
+                        batch.batch_id
+                    ]
                     if serial_numbers is None:
                         batch.serial_numbers = None
                     else:
                         batch.serial_numbers = list(serial_numbers)
+                    batch.quantity = original_quantities[
+                        batch.batch_id
+                    ]
 
             ledger = self.inventory_service.ledger
+            ledger.transactions[:] = original_transactions
 
-            ledger.transactions = [
-                transaction
-                for transaction in ledger.transactions
-                if transaction.reference_id != transfer.transfer_id
-            ]
+            transfer.status = original_transfer_status
+            transfer.dispatched_at = original_dispatched_at
 
             for item in transfer.items:
-                item.batch_allocations = {}
+                batch_allocations, serial_allocations = original_item_allocations[
+                    id(item)
+                ]
+                item.batch_allocations = dict(batch_allocations)
+                item.serial_allocations = {
+                    batch_id: list(serials)
+                    for batch_id, serials in serial_allocations.items()
+                }
 
             raise
 
@@ -241,16 +305,27 @@ class StockTransferService:
         timestamp: datetime | None = None,
     ) -> StockTransfer:
         if not isinstance(transfer, StockTransfer):
-            raise ValueError("Transfer must be a StockTransfer")
+            raise ValueError(
+                "Transfer must be a StockTransfer"
+            )
 
         if timestamp is None:
             timestamp = datetime.now()
 
         if not isinstance(timestamp, datetime):
-            raise ValueError("Timestamp must be a datetime")
+            raise ValueError(
+                "Timestamp must be a datetime"
+            )
 
         if transfer.status != TransferStatus.IN_TRANSIT:
-            raise ValueError("Only IN_TRANSIT transfers can be received")
+            raise ValueError(
+                "Only IN_TRANSIT transfers can be received"
+            )
+
+        if self.inventory_service is None:
+            raise ValueError(
+                "Inventory service is required"
+            )
 
         created_batches = []
         recorded_transactions = []
@@ -262,7 +337,9 @@ class StockTransferService:
                         f"No batch allocation found for SKU {item.sku}"
                     )
 
-                for batch_id, quantity in item.batch_allocations.items():
+                for batch_id, quantity in (
+                    item.batch_allocations.items()
+                ):
                     source_batch = next(
                         (
                             batch
@@ -280,39 +357,63 @@ class StockTransferService:
                     serial_numbers = None
 
                     if source_batch.serial_numbers is not None:
-                        serial_numbers = []
+                        serial_numbers = list(
+                            item.serial_allocations.get(
+                                batch_id,
+                                [],
+                            )
+                        )
+
+                        if len(serial_numbers) != quantity:
+                            raise ValueError(
+                                "Serial allocations do not match "
+                                f"batch quantity for {batch_id}"
+                            )
 
                     destination_batch = Batch(
-                        batch_id=f"{transfer.transfer_id}-{batch_id}",
+                        batch_id=(
+                            f"{transfer.transfer_id}-{batch_id}"
+                        ),
                         product=source_batch.product,
                         quantity=quantity,
                         entry_date=timestamp.date(),
                         expiry_date=source_batch.expiry_date,
                         serial_numbers=serial_numbers,
+                        unit_cost=source_batch.unit_cost,
                     )
 
                     self.destination_inventory.add_batch(
                         destination_batch
                     )
 
-                    created_batches.append(destination_batch)
+                    created_batches.append(
+                        destination_batch
+                    )
 
                     transaction = InventoryTransaction(
                         timestamp=timestamp,
-                        warehouse=self.destination_inventory.warehouse,
+                        warehouse=(
+                            self.destination_inventory.warehouse
+                        ),
                         sku=item.sku,
                         quantity=quantity,
-                        transaction_type=InventoryTransactionType.TRANSFER_IN,
+                        transaction_type=(
+                            InventoryTransactionType.TRANSFER_IN
+                        ),
                         reference_id=transfer.transfer_id,
                         batch_id=destination_batch.batch_id,
                         serial_numbers=serial_numbers,
                     )
 
-                    self.inventory_service.ledger.record(transaction)
-                    recorded_transactions.append(transaction)
+                    self.inventory_service.ledger.record(
+                        transaction
+                    )
+
+                    recorded_transactions.append(
+                        transaction
+                    )
 
             transfer.received_at = timestamp
-            transfer.status = TransferStatus.RECEIVED
             transfer.status = TransferStatus.COMPLETED
 
             return transfer
@@ -320,11 +421,14 @@ class StockTransferService:
         except Exception:
             for batch in created_batches:
                 if batch in self.destination_inventory.batches:
-                    self.destination_inventory.batches.remove(batch)
+                    self.destination_inventory.batches.remove(
+                        batch
+                    )
 
             self.inventory_service.ledger.transactions = [
                 transaction
-                for transaction in self.inventory_service.ledger.transactions
+                for transaction
+                in self.inventory_service.ledger.transactions
                 if transaction not in recorded_transactions
             ]
 

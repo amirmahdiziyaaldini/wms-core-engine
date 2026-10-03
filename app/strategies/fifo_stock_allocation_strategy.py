@@ -29,7 +29,7 @@ class FIFOStockAllocationStrategy(StockAllocationStrategy):
             if batch.quantity <= 0:
                 continue
 
-            if reference_date is not None and batch.is_expired(reference_date):
+            if batch.is_expired(reference_date):
                 continue
 
             valid_batches.append(batch)

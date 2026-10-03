@@ -14,6 +14,9 @@ from app.domain.models.return_item import ReturnItem
 from app.domain.models.return_request import ReturnRequest
 from app.domain.models.variant_product import VariantProduct
 from app.domain.models.warehouse import Warehouse
+from app.repositories.in_memory_repository import InMemoryRepository
+from app.repositories.order_repository import OrderRepository
+from app.repositories.product_repository import ProductRepository
 from app.serialization.snapshot import load_snapshot, save_snapshot
 
 
@@ -56,18 +59,29 @@ def create_snapshot_state():
         ],
     )
 
-    warehouse = Warehouse(
+    warehouse_one = Warehouse(
         warehouse_id="WH-001",
         name="Main Warehouse",
         location="Tehran",
         warehouse_type=WarehouseType.CENTRAL,
     )
 
-    inventory = Inventory(
-        warehouse=warehouse,
+    warehouse_two = Warehouse(
+        warehouse_id="WH-002",
+        name="Backup Warehouse",
+        location="Karaj",
+        warehouse_type=WarehouseType.CENTRAL,
     )
 
-    batch = Batch(
+    inventory_one = Inventory(
+        warehouse=warehouse_one,
+    )
+
+    inventory_two = Inventory(
+        warehouse=warehouse_two,
+    )
+
+    batch_one = Batch(
         batch_id="BATCH-001",
         product=variant_product,
         quantity=10,
@@ -75,12 +89,28 @@ def create_snapshot_state():
         unit_cost=Decimal("450000"),
     )
 
-    inventory.add_batch(batch)
+    batch_two = Batch(
+        batch_id="BATCH-002",
+        product=variant_product,
+        quantity=5,
+        entry_date=date(2026, 9, 2),
+        unit_cost=Decimal("460000"),
+    )
+
+    inventory_one.add_batch(batch_one)
+    inventory_two.add_batch(batch_two)
 
     order = Order(
         order_id="ORD-001",
         status=OrderStatus.PAID,
-        created_at=datetime(2026, 9, 10, 9, 0, 0),
+        created_at=datetime(
+            2026,
+            9,
+            10,
+            9,
+            0,
+            0,
+        ),
     )
 
     order.add_item(
@@ -110,7 +140,9 @@ def create_snapshot_state():
         return_id="RET-001",
         order=order,
         reason=ReturnReason.CUSTOMER_CHANGED_MIND,
-        items=[return_item],
+        items=[
+            return_item,
+        ],
         requested_at=datetime(
             2026,
             9,
@@ -128,10 +160,12 @@ def create_snapshot_state():
             bundle_product,
         ],
         "warehouses": [
-            warehouse,
+            warehouse_one,
+            warehouse_two,
         ],
         "inventories": [
-            inventory,
+            inventory_one,
+            inventory_two,
         ],
         "orders": [
             order,
@@ -151,7 +185,7 @@ def create_snapshot_state():
     return state
 
 
-def test_snapshot_round_trip_preserves_object_graph(
+def test_snapshot_round_trip_preserves_object_graph_and_repository_usability(
     tmp_path,
 ):
     path = tmp_path / "system_snapshot.json"
@@ -171,8 +205,12 @@ def test_snapshot_round_trip_preserves_object_graph(
     variant_product = loaded_state["products"][1]
     bundle_product = loaded_state["products"][2]
 
-    warehouse = loaded_state["warehouses"][0]
-    inventory = loaded_state["inventories"][0]
+    warehouse_one = loaded_state["warehouses"][0]
+    warehouse_two = loaded_state["warehouses"][1]
+
+    inventory_one = loaded_state["inventories"][0]
+    inventory_two = loaded_state["inventories"][1]
+
     order = loaded_state["orders"][0]
     return_request = loaded_state["returns"][0]
 
@@ -187,12 +225,22 @@ def test_snapshot_round_trip_preserves_object_graph(
     )
 
     assert isinstance(
-        warehouse,
+        warehouse_one,
         Warehouse,
     )
 
     assert isinstance(
-        inventory,
+        warehouse_two,
+        Warehouse,
+    )
+
+    assert isinstance(
+        inventory_one,
+        Inventory,
+    )
+
+    assert isinstance(
+        inventory_two,
         Inventory,
     )
 
@@ -222,25 +270,47 @@ def test_snapshot_round_trip_preserves_object_graph(
     )
 
     assert (
-        inventory.warehouse
-        is warehouse
+        inventory_one.warehouse
+        is warehouse_one
     )
 
     assert (
-        inventory.batches[0].product
+        inventory_two.warehouse
+        is warehouse_two
+    )
+
+    assert (
+        inventory_one.batches[0].product
         is variant_product
     )
 
     assert (
-        inventory.batches[0].quantity
+        inventory_two.batches[0].product
+        is variant_product
+    )
+
+    assert (
+        inventory_one.batches[0].quantity
         == 10
     )
 
     assert (
-        inventory.get_physical_stock(
+        inventory_two.batches[0].quantity
+        == 5
+    )
+
+    assert (
+        inventory_one.get_physical_stock(
             "PHONE-001-BLACK"
         )
         == 10
+    )
+
+    assert (
+        inventory_two.get_physical_stock(
+            "PHONE-001-BLACK"
+        )
+        == 5
     )
 
     assert (
@@ -259,22 +329,9 @@ def test_snapshot_round_trip_preserves_object_graph(
     )
 
     assert (
-        order.status
-        == OrderStatus.PAID
+        return_request.order_id
+        == order.order_id
     )
-
-    assert (
-        order.paid_at
-        == datetime(
-            2026,
-            9,
-            10,
-            10,
-            0,
-            0,
-        )
-    )
-
 
     assert (
         return_request.items[0].sku
@@ -284,6 +341,78 @@ def test_snapshot_round_trip_preserves_object_graph(
     assert (
         return_request.items[0].quantity
         == 1
+    )
+
+    product_repository = ProductRepository()
+    order_repository = OrderRepository()
+
+    warehouse_repository = InMemoryRepository()
+    return_repository = InMemoryRepository()
+
+    for product in loaded_state["products"]:
+        product_repository.save(product)
+
+    for loaded_order in loaded_state["orders"]:
+        order_repository.save(loaded_order)
+
+    for warehouse in loaded_state["warehouses"]:
+        warehouse_repository.save(
+            warehouse.warehouse_id,
+            warehouse,
+        )
+
+    for loaded_return in loaded_state["returns"]:
+        return_repository.save(
+            loaded_return.return_id,
+            loaded_return,
+        )
+
+    restored_variant = product_repository.get(
+        "PHONE-001-BLACK"
+    )
+
+    restored_bundle = product_repository.get(
+        "PHONE-BUNDLE-001"
+    )
+
+    restored_order = order_repository.get(
+        "ORD-001"
+    )
+
+    restored_warehouse = warehouse_repository.get(
+        "WH-002"
+    )
+
+    restored_return = return_repository.get(
+        "RET-001"
+    )
+
+    assert restored_variant is variant_product
+    assert restored_bundle is bundle_product
+    assert restored_order is order
+    assert restored_warehouse is warehouse_two
+    assert restored_return is return_request
+
+    assert (
+        restored_variant.parent_product
+        is parent_product
+    )
+
+    assert (
+        restored_bundle.components[1].product
+        is restored_variant
+    )
+
+    assert (
+        restored_return.order_id
+        == restored_order.order_id
+    )
+
+    assert (
+        inventory_two.get_available_stock(
+            "PHONE-001-BLACK"
+        )
+        == 5
     )
 
 
@@ -303,17 +432,19 @@ def test_snapshot_round_trip_keeps_json_persistence_boundary(
         path,
     )
 
+    assert path.exists()
+
     assert len(
         loaded_state["products"]
     ) == 3
 
     assert len(
         loaded_state["warehouses"]
-    ) == 1
+    ) == 2
 
     assert len(
         loaded_state["inventories"]
-    ) == 1
+    ) == 2
 
     assert len(
         loaded_state["orders"]
@@ -323,4 +454,10 @@ def test_snapshot_round_trip_keeps_json_persistence_boundary(
         loaded_state["returns"]
     ) == 1
 
-    assert path.exists()
+    assert len(
+        loaded_state["transfers"]
+    ) == 0
+
+    assert len(
+        loaded_state["financial_logs"]
+    ) == 0

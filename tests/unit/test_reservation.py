@@ -202,7 +202,7 @@ def test_total_batch_allocation_cannot_exceed_quantity():
 
 def test_batch_allocations_are_copied():
     allocations = {
-        "BATCH-001": 2,
+        "BATCH-001": 3,
     }
 
     reservation = create_reservation(
@@ -212,5 +212,5 @@ def test_batch_allocations_are_copied():
     allocations["BATCH-002"] = 1
 
     assert reservation.batch_allocations == {
-        "BATCH-001": 2,
+        "BATCH-001": 3,
     }

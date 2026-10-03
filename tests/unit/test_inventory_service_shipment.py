@@ -247,7 +247,7 @@ def test_consume_reservation_rejects_missing_batch():
         },
     )
 
-    inventory.reserve_reservation(reservation)
+    inventory.reservations[reservation.reservation_id] = reservation
 
     with pytest.raises(ValueError):
         service.consume_reservation(
@@ -273,11 +273,11 @@ def test_consume_reservation_rejects_mismatched_allocation_quantity():
     reservation = create_reservation(
         quantity=4,
         batch_allocations={
-            "BATCH-001": 3,
+            "BATCH-001": 4,
         },
     )
-
-    inventory.reserve_reservation(reservation)
+    reservation.batch_allocations["BATCH-001"] = 3
+    inventory.reservations[reservation.reservation_id] = reservation
 
     with pytest.raises(ValueError):
         service.consume_reservation(

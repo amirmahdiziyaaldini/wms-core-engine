@@ -48,8 +48,11 @@ class BaseProduct:
         self.expiry_tracking = False
         self.serial_tracking = False
 
-    def get_price(self) -> Decimal:
+    def price_get(self) -> Decimal:
         return self.base_price
+
+    def get_price(self) -> Decimal:
+        return self.price_get()
 
     def to_dict(self) -> dict:
         return {

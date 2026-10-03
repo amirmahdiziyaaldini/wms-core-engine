@@ -1,13 +1,14 @@
-import pytest
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
+from app.domain.enums.warehouse_type import WarehouseType
 from app.domain.models.base_product import BaseProduct
 from app.domain.models.batch import Batch
 from app.domain.models.inventory import Inventory
 from app.domain.models.reservation import Reservation
 from app.domain.models.warehouse import Warehouse
-from app.domain.enums.warehouse_type import WarehouseType
 
 
 def create_product(sku="LAPTOP-01"):
@@ -39,6 +40,22 @@ def create_batch(
         product=create_product(sku),
         quantity=quantity,
         entry_date=date(2026, 9, 1),
+    )
+
+
+def create_reservation(
+    reservation_id="RES-001",
+    order_id="ORD-001",
+    order_item_id="ITEM-001",
+    sku="LAPTOP-01",
+    quantity=4,
+):
+    return Reservation(
+        reservation_id=reservation_id,
+        order_id=order_id,
+        order_item_id=order_item_id,
+        sku=sku,
+        quantity=quantity,
     )
 
 
@@ -122,6 +139,16 @@ def test_physical_stock_ignores_other_skus():
     assert inventory.get_physical_stock("PHONE-01") == 20
 
 
+def test_physical_stock_returns_zero_for_unknown_sku():
+    inventory = Inventory(create_warehouse())
+
+    inventory.add_batch(
+        create_batch(quantity=10)
+    )
+
+    assert inventory.get_physical_stock("PHONE-999") == 0
+
+
 def test_physical_stock_requires_string_sku():
     inventory = Inventory(create_warehouse())
 
@@ -146,6 +173,16 @@ def test_reserved_stock_is_zero_without_reservations():
     assert inventory.get_reserved_stock("LAPTOP-01") == 0
 
 
+def test_reserved_stock_returns_zero_for_unknown_sku():
+    inventory = Inventory(create_warehouse())
+
+    inventory.add_batch(
+        create_batch(quantity=10)
+    )
+
+    assert inventory.get_reserved_stock("PHONE-999") == 0
+
+
 def test_available_stock_equals_physical_stock_without_reservations():
     inventory = Inventory(create_warehouse())
 
@@ -156,6 +193,12 @@ def test_available_stock_equals_physical_stock_without_reservations():
     assert inventory.get_available_stock("LAPTOP-01") == 10
 
 
+def test_available_stock_is_zero_for_unknown_sku():
+    inventory = Inventory(create_warehouse())
+
+    assert inventory.get_available_stock("PHONE-999") == 0
+
+
 def test_reservation_does_not_reduce_physical_stock():
     inventory = Inventory(create_warehouse())
 
@@ -163,17 +206,27 @@ def test_reservation_does_not_reduce_physical_stock():
         create_batch(quantity=10)
     )
 
-    reservation = Reservation(
-        reservation_id="RES-001",
-        order_id="ORD-001",
-        order_item_id="ITEM-001",
-        sku="LAPTOP-01",
-        quantity=4,
-    )
+    reservation = create_reservation(quantity=4)
 
     inventory.reserve_reservation(reservation)
 
     assert inventory.get_physical_stock("LAPTOP-01") == 10
+
+
+def test_exact_reservation_consumes_all_available_stock():
+    inventory = Inventory(create_warehouse())
+
+    inventory.add_batch(
+        create_batch(quantity=10)
+    )
+
+    reservation = create_reservation(quantity=10)
+
+    inventory.reserve_reservation(reservation)
+
+    assert inventory.get_physical_stock("LAPTOP-01") == 10
+    assert inventory.get_reserved_stock("LAPTOP-01") == 10
+    assert inventory.get_available_stock("LAPTOP-01") == 0
 
 
 def test_multiple_reservations_are_combined():
@@ -183,19 +236,17 @@ def test_multiple_reservations_are_combined():
         create_batch(quantity=10)
     )
 
-    reservation_1 = Reservation(
+    reservation_1 = create_reservation(
         reservation_id="RES-001",
         order_id="ORD-001",
         order_item_id="ITEM-001",
-        sku="LAPTOP-01",
         quantity=3,
     )
 
-    reservation_2 = Reservation(
+    reservation_2 = create_reservation(
         reservation_id="RES-002",
         order_id="ORD-002",
         order_item_id="ITEM-002",
-        sku="LAPTOP-01",
         quantity=2,
     )
 
@@ -213,13 +264,7 @@ def test_overselling_is_rejected():
         create_batch(quantity=10)
     )
 
-    reservation = Reservation(
-        reservation_id="RES-001",
-        order_id="ORD-001",
-        order_item_id="ITEM-001",
-        sku="LAPTOP-01",
-        quantity=10,
-    )
+    reservation = create_reservation(quantity=10)
 
     inventory.reserve_reservation(reservation)
 
@@ -227,6 +272,24 @@ def test_overselling_is_rejected():
         inventory.reserve(
             reservation_id="RES-002",
             sku="LAPTOP-01",
+            quantity=1,
+        )
+
+    assert inventory.get_reserved_stock("LAPTOP-01") == 10
+    assert inventory.get_available_stock("LAPTOP-01") == 0
+
+
+def test_reserve_unknown_sku_is_rejected():
+    inventory = Inventory(create_warehouse())
+
+    inventory.add_batch(
+        create_batch(quantity=10)
+    )
+
+    with pytest.raises(ValueError):
+        inventory.reserve(
+            reservation_id="RES-001",
+            sku="PHONE-999",
             quantity=1,
         )
 
@@ -238,13 +301,7 @@ def test_release_reservation_increases_available_stock():
         create_batch(quantity=10)
     )
 
-    reservation = Reservation(
-        reservation_id="RES-001",
-        order_id="ORD-001",
-        order_item_id="ITEM-001",
-        sku="LAPTOP-01",
-        quantity=4,
-    )
+    reservation = create_reservation(quantity=4)
 
     inventory.reserve_reservation(reservation)
 
@@ -254,6 +311,7 @@ def test_release_reservation_increases_available_stock():
 
     assert inventory.get_reserved_stock("LAPTOP-01") == 0
     assert inventory.get_available_stock("LAPTOP-01") == 10
+    assert inventory.get_physical_stock("LAPTOP-01") == 10
 
 
 def test_release_only_removes_requested_reservation():
@@ -263,19 +321,17 @@ def test_release_only_removes_requested_reservation():
         create_batch(quantity=10)
     )
 
-    reservation_1 = Reservation(
+    reservation_1 = create_reservation(
         reservation_id="RES-001",
         order_id="ORD-001",
         order_item_id="ITEM-001",
-        sku="LAPTOP-01",
         quantity=3,
     )
 
-    reservation_2 = Reservation(
+    reservation_2 = create_reservation(
         reservation_id="RES-002",
         order_id="ORD-002",
         order_item_id="ITEM-002",
-        sku="LAPTOP-01",
         quantity=2,
     )
 
@@ -377,18 +433,31 @@ def test_duplicate_reservation_id_is_rejected():
         create_batch(quantity=10)
     )
 
-    reservation = Reservation(
-        reservation_id="RES-001",
-        order_id="ORD-001",
-        order_item_id="ITEM-001",
-        sku="LAPTOP-01",
-        quantity=2,
-    )
+    reservation = create_reservation(quantity=2)
 
     inventory.reserve_reservation(reservation)
 
     with pytest.raises(ValueError):
         inventory.reserve_reservation(reservation)
+
+
+def test_duplicate_reservation_does_not_change_stock():
+    inventory = Inventory(create_warehouse())
+
+    inventory.add_batch(
+        create_batch(quantity=10)
+    )
+
+    reservation = create_reservation(quantity=2)
+
+    inventory.reserve_reservation(reservation)
+
+    with pytest.raises(ValueError):
+        inventory.reserve_reservation(reservation)
+
+    assert inventory.get_physical_stock("LAPTOP-01") == 10
+    assert inventory.get_reserved_stock("LAPTOP-01") == 2
+    assert inventory.get_available_stock("LAPTOP-01") == 8
 
 
 def test_reservation_quantity_must_be_positive():

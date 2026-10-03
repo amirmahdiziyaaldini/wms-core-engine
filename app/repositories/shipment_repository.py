@@ -67,6 +67,15 @@ class ShipmentRepository:
             if serial_number in shipment.serial_numbers
         ]
 
+    def delete(
+        self,
+        shipment_id: str,
+    ) -> Shipment | None:
+        if not isinstance(shipment_id, str):
+            raise ValueError("Shipment ID must be a string")
+
+        return self._shipments.pop(shipment_id, None)
+
     def list_all(self) -> list[Shipment]:
         return list(
             self._shipments.values()

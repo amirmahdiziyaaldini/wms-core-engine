@@ -89,7 +89,38 @@ class ReturnRequest:
 
         current_quantities: dict[str, int] = {}
 
+        order_items_by_id = {
+            order_item.item_id: order_item
+            for order_item in order.items
+        }
+
+        order_sku_counts: dict[str, int] = {}
+        for order_item in order.items:
+            order_sku_counts[order_item.sku] = (
+                order_sku_counts.get(order_item.sku, 0) + 1
+            )
+
         for item in items:
+            if item.order_item_id is not None:
+                order_item = order_items_by_id.get(
+                    item.order_item_id
+                )
+
+                if order_item is None:
+                    raise ValueError(
+                        f"Order item {item.order_item_id} is not part of the order"
+                    )
+
+                if order_item.sku != item.sku:
+                    raise ValueError(
+                        "Return item SKU does not match order item SKU"
+                    )
+
+            elif order_sku_counts.get(item.sku, 0) > 1:
+                raise ValueError(
+                    f"Order item reference is required for duplicate SKU {item.sku}"
+                )
+
             current_quantities[item.sku] = (
                 current_quantities.get(item.sku, 0)
                 + item.quantity

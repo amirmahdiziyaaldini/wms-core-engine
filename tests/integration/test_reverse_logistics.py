@@ -1,6 +1,8 @@
 from datetime import date, datetime
 from decimal import Decimal
 
+import pytest
+
 from app.domain.enums.inventory_transaction_type import InventoryTransactionType
 from app.domain.enums.qc_result import QCResult
 from app.domain.enums.return_reason import ReturnReason
@@ -16,14 +18,14 @@ from app.domain.models.return_item import ReturnItem
 from app.domain.models.return_request import ReturnRequest
 from app.domain.models.warehouse import Warehouse
 from app.domain.states.return_state_machine import ReturnStateMachine
+from app.repositories.financial_transaction_repository import (
+    FinancialTransactionRepository,
+)
 from app.services.inventory_service import InventoryService
 from app.services.qc_service import QCService
 from app.services.refund_service import RefundService
 from app.services.return_receiving_service import ReturnReceivingService
 from app.services.rma_service import RMAService
-from app.repositories.financial_transaction_repository import (
-    FinancialTransactionRepository,
-)
 
 
 def create_product():
@@ -90,15 +92,48 @@ def move_return_to_qc(return_request, return_receipt):
 
     state_machine.transition(
         return_request,
-        ReturnStatus.RECEIVED_AT_WAREHOUSE,
-        return_receipt.received_at,
-    )
-
-    state_machine.transition(
-        return_request,
         ReturnStatus.QC_INSPECTION,
         return_receipt.received_at,
     )
+
+
+def test_return_receiving_keeps_returned_stock_out_of_sellable_inventory():
+    product = create_product()
+    order = create_order()
+
+    sellable_inventory, quarantine_inventory = create_inventories(product)
+
+    return_request = ReturnRequest(
+        return_id="RETURN-RECEIVING-001",
+        order=order,
+        reason=ReturnReason.CUSTOMER_CHANGED_MIND,
+        items=[
+            ReturnItem(
+                sku=product.sku,
+                quantity=1,
+            )
+        ],
+        requested_at=datetime(2026, 9, 27, 10, 0, 0),
+    )
+
+    receiving_service = ReturnReceivingService()
+
+    return_receipt = receiving_service.receive(
+        return_request=return_request,
+        sku=product.sku,
+        quantity=1,
+        receipt_id="RECEIPT-RECEIVING-001",
+        received_at=datetime(2026, 9, 27, 11, 0, 0),
+    )
+
+    assert return_receipt.status == ReturnStatus.RECEIVED_AT_WAREHOUSE.value
+    assert return_receipt.location == "RETURN_QUARANTINE"
+
+    assert sellable_inventory.get_physical_stock(product.sku) == 2
+    assert sellable_inventory.get_available_stock(product.sku) == 2
+
+    assert quarantine_inventory.get_physical_stock(product.sku) == 0
+    assert return_request.status == ReturnStatus.RECEIVED_AT_WAREHOUSE
 
 
 def test_customer_regret_return_goes_back_to_sellable_inventory_and_refund():
@@ -133,6 +168,9 @@ def test_customer_regret_return_goes_back_to_sellable_inventory_and_refund():
     assert return_receipt.status == ReturnStatus.RECEIVED_AT_WAREHOUSE.value
     assert return_receipt.location == "RETURN_QUARANTINE"
 
+    assert sellable_inventory.get_physical_stock(product.sku) == 2
+    assert sellable_inventory.get_available_stock(product.sku) == 2
+
     move_return_to_qc(return_request, return_receipt)
 
     qc_service = QCService()
@@ -146,6 +184,7 @@ def test_customer_regret_return_goes_back_to_sellable_inventory_and_refund():
 
     assert return_request.status == ReturnStatus.QC_INSPECTION
     assert return_request.qc_result == QCResult.APPROVED
+    assert return_request.qc_note == "Product is healthy and resellable."
 
     state_machine = ReturnStateMachine()
 
@@ -154,6 +193,9 @@ def test_customer_regret_return_goes_back_to_sellable_inventory_and_refund():
         ReturnStatus.APPROVED,
         datetime(2026, 9, 27, 12, 30, 0),
     )
+
+    assert return_request.status == ReturnStatus.APPROVED
+    assert return_request.approved_at == datetime(2026, 9, 27, 12, 30, 0)
 
     ledger = InventoryLedger()
     inventory_service = InventoryService(ledger=ledger)
@@ -186,6 +228,7 @@ def test_customer_regret_return_goes_back_to_sellable_inventory_and_refund():
         InventoryTransactionType.RETURN_TO_STOCK
     )
     assert ledger.transactions[0].quantity == 1
+    assert ledger.transactions[0].reference_id == return_request.return_id
 
     refund_repository = FinancialTransactionRepository()
 
@@ -212,6 +255,8 @@ def test_customer_regret_return_goes_back_to_sellable_inventory_and_refund():
 
     assert saved_refund is not None
     assert saved_refund.amount == Decimal("100.00")
+
+    assert sellable_inventory.get_available_stock(product.sku) == 3
 
 
 def test_defective_return_goes_to_scrap_quarantine():
@@ -243,6 +288,12 @@ def test_defective_return_goes_to_scrap_quarantine():
         received_at=datetime(2026, 9, 27, 11, 0, 0),
     )
 
+    assert return_receipt.status == ReturnStatus.RECEIVED_AT_WAREHOUSE.value
+    assert return_receipt.location == "RETURN_QUARANTINE"
+
+    assert sellable_inventory.get_physical_stock(product.sku) == 2
+    assert sellable_inventory.get_available_stock(product.sku) == 2
+
     move_return_to_qc(return_request, return_receipt)
 
     qc_service = QCService()
@@ -256,6 +307,7 @@ def test_defective_return_goes_to_scrap_quarantine():
 
     assert return_request.status == ReturnStatus.QC_INSPECTION
     assert return_request.qc_result == QCResult.INHERENT_DEFECT
+    assert return_request.qc_note == "Product is defective and cannot be resold."
 
     state_machine = ReturnStateMachine()
 
@@ -264,6 +316,8 @@ def test_defective_return_goes_to_scrap_quarantine():
         ReturnStatus.APPROVED,
         datetime(2026, 9, 27, 12, 30, 0),
     )
+
+    assert return_request.status == ReturnStatus.APPROVED
 
     ledger = InventoryLedger()
     inventory_service = InventoryService(ledger=ledger)
@@ -298,3 +352,77 @@ def test_defective_return_goes_to_scrap_quarantine():
         InventoryTransactionType.SCRAP
     )
     assert ledger.transactions[0].quantity == 1
+    assert ledger.transactions[0].reference_id == return_request.return_id
+
+
+def test_refund_is_based_on_returned_quantity_and_cannot_be_repeated():
+    product = create_product()
+    order = create_order()
+
+    return_request = ReturnRequest(
+        return_id="RETURN-REFUND-001",
+        order=order,
+        reason=ReturnReason.CUSTOMER_CHANGED_MIND,
+        items=[
+            ReturnItem(
+                sku=product.sku,
+                quantity=1,
+            )
+        ],
+        requested_at=datetime(2026, 9, 27, 10, 0, 0),
+    )
+
+    state_machine = ReturnStateMachine()
+
+    state_machine.transition(
+        return_request,
+        ReturnStatus.RECEIVED_AT_WAREHOUSE,
+        datetime(2026, 9, 27, 11, 0, 0),
+    )
+
+    state_machine.transition(
+        return_request,
+        ReturnStatus.QC_INSPECTION,
+        datetime(2026, 9, 27, 12, 0, 0),
+    )
+
+    state_machine.transition(
+        return_request,
+        ReturnStatus.APPROVED,
+        datetime(2026, 9, 27, 12, 30, 0),
+    )
+
+    assert return_request.status == ReturnStatus.APPROVED
+
+    refund_repository = FinancialTransactionRepository()
+
+    refund_service = RefundService(
+        financial_transaction_repository=refund_repository,
+    )
+
+    refund = refund_service.refund(
+        return_request=return_request,
+        order=order,
+        timestamp=datetime(2026, 9, 27, 14, 0, 0),
+    )
+
+    assert refund.amount == Decimal("100.00")
+    assert return_request.status == ReturnStatus.REFUNDED
+
+    with pytest.raises(
+        ValueError,
+        match="Only approved returns can be refunded",
+    ):
+        refund_service.refund(
+            return_request=return_request,
+            order=order,
+            timestamp=datetime(2026, 9, 27, 15, 0, 0),
+        )
+
+    saved_refund = refund_repository.get_by_return_id(
+        return_request.return_id
+    )
+
+    assert saved_refund is not None
+    assert saved_refund.amount == Decimal("100.00")
+    assert saved_refund.timestamp == datetime(2026, 9, 27, 14, 0, 0)

@@ -4,6 +4,7 @@ from app.domain.enums.return_status import ReturnStatus
 from app.domain.models.return_receipt import ReturnReceipt
 from app.domain.models.return_request import ReturnRequest
 from app.domain.models.shipment import Shipment
+from app.domain.states.return_state_machine import ReturnStateMachine
 from app.repositories.shipment_repository import ShipmentRepository
 
 
@@ -26,6 +27,8 @@ class ReturnReceivingService:
             if shipment_repository is not None
             else ShipmentRepository()
         )
+
+        self.return_state_machine = ReturnStateMachine()
 
     def receive(
         self,
@@ -80,6 +83,13 @@ class ReturnReceivingService:
                 "Return request cannot receive items in its current state"
             )
 
+        received_quantities = getattr(return_request, "_received_quantities", {})
+        received_receipt_ids = getattr(return_request, "_received_receipt_ids", [])
+        received_serial_numbers = getattr(return_request, "_received_serial_numbers", {})
+
+        if receipt_id in received_receipt_ids:
+            raise ValueError("Receipt ID already exists for this return")
+
         requested_quantity = 0
         requested_serial_numbers: set[str] = set()
 
@@ -99,9 +109,11 @@ class ReturnReceivingService:
                 f"SKU {sku} is not part of the return request"
             )
 
-        if quantity > requested_quantity:
+        already_received_quantity = received_quantities.get(sku, 0)
+
+        if already_received_quantity + quantity > requested_quantity:
             raise ValueError(
-                "Received quantity cannot exceed requested quantity"
+                "Received quantity cannot exceed requested quantity cumulatively"
             )
 
         if serial_numbers is not None:
@@ -124,7 +136,14 @@ class ReturnReceivingService:
                     shipment.serial_numbers
                 )
 
+            previously_received_serials = set(received_serial_numbers.get(sku, []))
+
             for serial_number in serial_numbers:
+                if serial_number in previously_received_serials:
+                    raise ValueError(
+                        f"Serial number {serial_number} was already received for this return"
+                    )
+
                 if serial_number not in shipment_serial_numbers:
                     raise ValueError(
                         f"Serial number {serial_number} was not sold in the original order"
@@ -138,7 +157,7 @@ class ReturnReceivingService:
                         f"Serial number {serial_number} is not part of the return request"
                     )
 
-        return ReturnReceipt(
+        receipt = ReturnReceipt(
             receipt_id=receipt_id,
             return_id=return_request.return_id,
             sku=sku,
@@ -148,3 +167,22 @@ class ReturnReceivingService:
             status=ReturnStatus.RECEIVED_AT_WAREHOUSE.value,
             received_at=received_at,
         )
+
+        if return_request.status == ReturnStatus.REQUESTED:
+            self.return_state_machine.transition(
+                return_request,
+                ReturnStatus.RECEIVED_AT_WAREHOUSE,
+                timestamp=receipt.received_at,
+            )
+
+        received_quantities[sku] = already_received_quantity + quantity
+        received_receipt_ids.append(receipt_id)
+
+        if serial_numbers is not None:
+            received_serial_numbers.setdefault(sku, []).extend(serial_numbers)
+
+        return_request._received_quantities = received_quantities
+        return_request._received_receipt_ids = received_receipt_ids
+        return_request._received_serial_numbers = received_serial_numbers
+
+        return receipt

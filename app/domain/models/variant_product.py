@@ -35,13 +35,16 @@ class VariantProduct(BaseProduct):
         self.price_modifier = price_modifier
         self.parent_product = parent_product
 
-    def get_price(self) -> Decimal:
+    def price_get(self) -> Decimal:
         final_price = self.base_price + self.price_modifier
 
         if final_price < 0:
             raise ValueError("Final price cannot be negative")
 
         return final_price
+
+    def get_price(self) -> Decimal:
+        return self.price_get()
 
     def to_dict(self) -> dict:
         return {

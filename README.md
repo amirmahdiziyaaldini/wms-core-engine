@@ -87,6 +87,92 @@ RMA
        v
 Refund
 
+
+## Order Cancellation Policy
+
+Order cancellation is supported before shipment.
+
+- CREATED orders can be cancelled directly.
+- RESERVED orders are cancelled by releasing all active reservations.
+- PAID orders can also be cancelled before shipment; their inventory reservations are released.
+- A payment transaction remains recorded as a financial/audit record and is not automatically deleted when an order is cancelled.
+- Refunds are handled separately through the return/refund flow.
+- SHIPPED and DELIVERED orders cannot be cancelled through the normal cancellation operation and must use the RMA/return process.
+
+
+## JSON Persistence
+
+The project uses in-memory repositories during runtime and JSON files for persistence.
+
+### Repository Layer
+
+Repositories are responsible only for storing and retrieving domain objects.
+
+The in-memory repository provides:
+
+- `save()`
+- `get()`
+- `list()`
+- `delete()`
+- `exists()`
+
+Missing entities are reported through the domain-level `EntityNotFoundError`.
+
+Business validation is kept in domain models, services, and policies rather than repositories.
+
+### Serialization
+
+The serialization layer converts domain objects into JSON-compatible data.
+
+The following values are handled explicitly:
+
+- `Decimal` → string
+- `date` / `datetime` → ISO-8601 string
+- `Enum` → stable enum representation
+- object references → stable IDs/SKUs
+- polymorphic products → `product_type` discriminator
+
+### Snapshot
+
+A complete system snapshot can be saved and loaded as JSON.
+
+The snapshot contains the runtime state required to restore the system, including:
+
+- Products
+- Warehouses
+- Batches
+- Inventory
+- Reservations
+- Orders
+- Transfers
+- Returns
+- Inventory Ledger
+- Financial Transactions
+- Payment Transactions
+- Shipments
+
+Snapshots contain a schema/version field so that the persistence format can evolve safely.
+
+Saving is performed through a temporary file followed by an atomic replacement of the target file.
+
+Loading a missing snapshot file follows the documented load policy and does not silently corrupt existing state.
+
+### Round-trip Persistence
+
+The persistence tests verify the following flow:
+
+`Domain Objects → JSON Snapshot → Load → Domain Objects`
+
+The restored objects must preserve important relationships such as:
+
+- Order → OrderItem
+- Return → Order
+- Batch → Product
+- Inventory → Warehouse
+- Bundle → Component Products
+- Reservations → Order Items
+
+
 ## Technologies
 
 - Python

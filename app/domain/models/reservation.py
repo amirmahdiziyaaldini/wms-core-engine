@@ -98,9 +98,9 @@ class Reservation:
 
                 total_allocated += allocated_quantity
 
-            if total_allocated > quantity:
+            if batch_allocations and total_allocated != quantity:
                 raise ValueError(
-                    "Total batch allocation cannot exceed reservation quantity"
+                    "Total batch allocation must equal reservation quantity"
                 )
 
             batch_allocations = batch_allocations.copy()

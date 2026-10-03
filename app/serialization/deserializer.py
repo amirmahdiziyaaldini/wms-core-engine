@@ -57,6 +57,7 @@ class DeserializationContext:
         self.payment_transactions: dict[str, PaymentTransaction] = {}
         self.financial_transactions: dict[str, FinancialTransaction] = {}
         self.serialized_units: dict[str, SerializedUnit] = {}
+        self.return_receipts: dict[str, ReturnReceipt] = {}
 
     def add_product(self, product: BaseProduct) -> None:
         if product.sku in self.products:
@@ -137,6 +138,55 @@ class DeserializationContext:
             raise MissingReferenceError(
                 f"Return reference not found: {return_id}"
             ) from exc
+
+    def add_reservation(self, reservation: Reservation) -> None:
+        if reservation.reservation_id in self.reservations:
+            raise DeserializationError(
+                f"Duplicate reservation ID: {reservation.reservation_id}"
+            )
+        self.reservations[reservation.reservation_id] = reservation
+
+    def add_transfer(self, transfer: StockTransfer) -> None:
+        if transfer.transfer_id in self.transfers:
+            raise DeserializationError(
+                f"Duplicate transfer ID: {transfer.transfer_id}"
+            )
+        self.transfers[transfer.transfer_id] = transfer
+
+    def add_return_receipt(self, receipt: ReturnReceipt) -> None:
+        if receipt.receipt_id in self.return_receipts:
+            raise DeserializationError(
+                f"Duplicate receipt ID: {receipt.receipt_id}"
+            )
+        self.return_receipts[receipt.receipt_id] = receipt
+
+    def add_serialized_unit(self, unit: SerializedUnit) -> None:
+        if unit.serial_number in self.serialized_units:
+            raise DeserializationError(
+                f"Duplicate serialized unit: {unit.serial_number}"
+            )
+        self.serialized_units[unit.serial_number] = unit
+
+    def add_shipment(self, shipment: Shipment) -> None:
+        if shipment.shipment_id in self.shipments:
+            raise DeserializationError(
+                f"Duplicate shipment ID: {shipment.shipment_id}"
+            )
+        self.shipments[shipment.shipment_id] = shipment
+
+    def add_payment_transaction(self, transaction: PaymentTransaction) -> None:
+        if transaction.transaction_id in self.payment_transactions:
+            raise DeserializationError(
+                f"Duplicate payment transaction ID: {transaction.transaction_id}"
+            )
+        self.payment_transactions[transaction.transaction_id] = transaction
+
+    def add_financial_transaction(self, transaction: FinancialTransaction) -> None:
+        if transaction.transaction_id in self.financial_transactions:
+            raise DeserializationError(
+                f"Duplicate financial transaction ID: {transaction.transaction_id}"
+            )
+        self.financial_transactions[transaction.transaction_id] = transaction
 
 
 def deserialize_value(value: Any) -> Any:
@@ -519,11 +569,13 @@ def _build_reservation(
             "batch_allocations",
             {},
         ),
+        serial_allocations=data.get(
+            "serial_allocations",
+            {},
+        ),
     )
 
-    context.reservations[
-        reservation.reservation_id
-    ] = reservation
+    context.add_reservation(reservation)
 
     return reservation
 
@@ -817,6 +869,10 @@ def _build_stock_transfer_item(
             "batch_allocations",
             {},
         ),
+        serial_allocations=data.get(
+            "serial_allocations",
+            {},
+        ),
     )
 
 
@@ -834,6 +890,9 @@ def _build_return_item(
         ),
         serial_numbers=data.get(
             "serial_numbers"
+        ),
+        order_item_id=data.get(
+            "order_item_id"
         ),
     )
 
@@ -891,9 +950,7 @@ def _build_stock_transfer(
         ),
     )
 
-    context.transfers[
-        transfer.transfer_id
-    ] = transfer
+    context.add_transfer(transfer)
 
     return transfer
 
@@ -1002,8 +1059,9 @@ def _build_return_request(
 
 def _build_return_receipt(
     data: dict[str, Any],
+    context: DeserializationContext,
 ) -> ReturnReceipt:
-    return ReturnReceipt(
+    receipt = ReturnReceipt(
         receipt_id=_required(
             data,
             "receipt_id",
@@ -1036,6 +1094,9 @@ def _build_return_receipt(
             "received_at",
         ),
     )
+
+    context.add_return_receipt(receipt)
+    return receipt
 
 
 def _build_serialized_unit(
@@ -1072,9 +1133,7 @@ def _build_serialized_unit(
         ),
     )
 
-    context.serialized_units[
-        unit.serial_number
-    ] = unit
+    context.add_serialized_unit(unit)
 
     return unit
 
@@ -1112,9 +1171,7 @@ def _build_shipment(
         ),
     )
 
-    context.shipments[
-        shipment.shipment_id
-    ] = shipment
+    context.add_shipment(shipment)
 
     return shipment
 
@@ -1148,9 +1205,7 @@ def _build_payment_transaction(
         ),
     )
 
-    context.payment_transactions[
-        transaction.transaction_id
-    ] = transaction
+    context.add_payment_transaction(transaction)
 
     return transaction
 
@@ -1193,9 +1248,7 @@ def _build_financial_transaction(
         ),
     )
 
-    context.financial_transactions[
-        transaction.transaction_id
-    ] = transaction
+    context.add_financial_transaction(transaction)
 
     return transaction
 

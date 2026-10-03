@@ -158,6 +158,40 @@ def test_non_expired_batch():
     ) is False
 
 
+def test_batch_is_not_expired_on_exact_expiry_date():
+    product = create_base_product()
+
+    expiry_date = date(2026, 12, 31)
+
+    batch = Batch(
+        batch_id="BATCH-001",
+        product=product,
+        quantity=10,
+        entry_date=date(2026, 9, 1),
+        expiry_date=expiry_date,
+    )
+
+    assert batch.is_expired(
+        reference_date=expiry_date
+    ) is False
+
+
+def test_batch_is_expired_after_expiry_date():
+    product = create_base_product()
+
+    batch = Batch(
+        batch_id="BATCH-001",
+        product=product,
+        quantity=10,
+        entry_date=date(2026, 9, 1),
+        expiry_date=date(2026, 12, 31),
+    )
+
+    assert batch.is_expired(
+        reference_date=date(2027, 1, 1)
+    ) is True
+
+
 def test_regular_product_batch_is_not_expired():
     product = create_base_product()
 
@@ -197,6 +231,21 @@ def test_batch_id_cannot_be_empty():
     ):
         Batch(
             batch_id="",
+            product=product,
+            quantity=10,
+            entry_date=date(2026, 9, 1),
+        )
+
+
+def test_batch_id_cannot_contain_only_whitespace():
+    product = create_base_product()
+
+    with pytest.raises(
+        ValueError,
+        match="Batch ID cannot be empty",
+    ):
+        Batch(
+            batch_id="   ",
             product=product,
             quantity=10,
             entry_date=date(2026, 9, 1),
@@ -257,6 +306,21 @@ def test_quantity_cannot_be_negative():
             batch_id="BATCH-001",
             product=product,
             quantity=-5,
+            entry_date=date(2026, 9, 1),
+        )
+
+
+def test_boolean_quantity_is_rejected():
+    product = create_base_product()
+
+    with pytest.raises(
+        ValueError,
+        match="Quantity must be an integer",
+    ):
+        Batch(
+            batch_id="BATCH-001",
+            product=product,
+            quantity=True,
             entry_date=date(2026, 9, 1),
         )
 

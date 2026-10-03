@@ -1,56 +1,96 @@
-from collections.abc import Callable
 from typing import Generic, TypeVar
 
-from app.repositories.base_repository import BaseRepository
+from app.domain.exceptions.entity_not_found import EntityNotFoundError
+
 
 T = TypeVar("T")
 
 
-class NotFoundException(Exception):
-    pass
-
-
-class InMemoryRepository(BaseRepository[T], Generic[T]):
-    def __init__(self, id_getter: Callable[[T], str]):
-        if not callable(id_getter):
-            raise ValueError("id_getter must be callable")
-
-        self._id_getter = id_getter
+class InMemoryRepository(Generic[T]):
+    def __init__(self):
         self._storage: dict[str, T] = {}
 
-    def save(self, entity: T) -> T:
+    def save(
+        self,
+        entity_id: str,
+        entity: T,
+    ) -> T:
+        if not isinstance(entity_id, str):
+            raise ValueError(
+                "Entity ID must be a string"
+            )
+
+        if not entity_id.strip():
+            raise ValueError(
+                "Entity ID cannot be empty"
+            )
+
         if entity is None:
-            raise ValueError("Entity cannot be None")
+            raise ValueError(
+                "Entity cannot be None"
+            )
 
-        entity_id = self._id_getter(entity)
-
-        if not isinstance(entity_id, str) or not entity_id.strip():
-            raise ValueError("Entity ID must be a non-empty string")
+        if entity_id in self._storage:
+            raise ValueError(
+                f"Entity already exists: {entity_id}"
+            )
 
         self._storage[entity_id] = entity
+
         return entity
 
-    def get_by_id(self, entity_id: str) -> T:
-        if not isinstance(entity_id, str) or not entity_id.strip():
-            raise ValueError("Entity ID must be a non-empty string")
+    def get(
+        self,
+        entity_id: str,
+    ) -> T:
+        if not isinstance(entity_id, str):
+            raise ValueError(
+                "Entity ID must be a string"
+            )
+
+        if not entity_id.strip():
+            raise ValueError(
+                "Entity ID cannot be empty"
+            )
 
         if entity_id not in self._storage:
-            raise NotFoundException(
-                f"Entity with id '{entity_id}' was not found"
+            raise EntityNotFoundError(
+                self.__class__.__name__,
+                entity_id,
             )
 
         return self._storage[entity_id]
 
-    def delete(self, entity_id: str) -> None:
-        if not isinstance(entity_id, str) or not entity_id.strip():
-            raise ValueError("Entity ID must be a non-empty string")
+    def list(self) -> list[T]:
+        return list(self._storage.values())
+
+    def delete(
+        self,
+        entity_id: str,
+    ) -> None:
+        if not isinstance(entity_id, str):
+            raise ValueError(
+                "Entity ID must be a string"
+            )
+
+        if not entity_id.strip():
+            raise ValueError(
+                "Entity ID cannot be empty"
+            )
 
         if entity_id not in self._storage:
-            raise NotFoundException(
-                f"Entity with id '{entity_id}' was not found"
+            raise EntityNotFoundError(
+                self.__class__.__name__,
+                entity_id,
             )
 
         del self._storage[entity_id]
 
-    def list(self) -> list[T]:
-        return list(self._storage.values())
+    def exists(
+        self,
+        entity_id: str,
+    ) -> bool:
+        return entity_id in self._storage
+
+    def clear(self) -> None:
+        self._storage.clear()
